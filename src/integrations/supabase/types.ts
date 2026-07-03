@@ -14,7 +14,80 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      scan_images: {
+        Row: {
+          created_at: string
+          id: string
+          scan_id: string
+          storage_path: string
+          user_id: string
+          view: Database["public"]["Enums"]["baggage_view"]
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          scan_id: string
+          storage_path: string
+          user_id: string
+          view: Database["public"]["Enums"]["baggage_view"]
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          scan_id?: string
+          storage_path?: string
+          user_id?: string
+          view?: Database["public"]["Enums"]["baggage_view"]
+        }
+        Relationships: [
+          {
+            foreignKeyName: "scan_images_scan_id_fkey"
+            columns: ["scan_id"]
+            isOneToOne: false
+            referencedRelation: "scans"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      scans: {
+        Row: {
+          analysis: Json | null
+          created_at: string
+          error: string | null
+          id: string
+          model: string
+          name: string
+          notes: string | null
+          status: Database["public"]["Enums"]["scan_status"]
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          analysis?: Json | null
+          created_at?: string
+          error?: string | null
+          id?: string
+          model?: string
+          name?: string
+          notes?: string | null
+          status?: Database["public"]["Enums"]["scan_status"]
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          analysis?: Json | null
+          created_at?: string
+          error?: string | null
+          id?: string
+          model?: string
+          name?: string
+          notes?: string | null
+          status?: Database["public"]["Enums"]["scan_status"]
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
@@ -23,7 +96,8 @@ export type Database = {
       [_ in never]: never
     }
     Enums: {
-      [_ in never]: never
+      baggage_view: "front" | "back" | "top" | "side"
+      scan_status: "pending" | "analyzing" | "completed" | "failed"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -150,6 +224,9 @@ export type CompositeTypes<
 
 export const Constants = {
   public: {
-    Enums: {},
+    Enums: {
+      baggage_view: ["front", "back", "top", "side"],
+      scan_status: ["pending", "analyzing", "completed", "failed"],
+    },
   },
 } as const
