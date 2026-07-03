@@ -70,5 +70,7 @@ export const analyzeBaggage = createServerFn({ method: "POST" })
       if (m) parsed = JSON.parse(m[0]);
       else throw new Error("AI returned non-JSON output");
     }
-    return { analysis: JSON.parse(JSON.stringify(parsed)) as unknown, model: data.model as string };
+    type Json = string | number | boolean | null | { [k: string]: Json } | Json[];
+    const analysis = JSON.parse(JSON.stringify(parsed)) as Json;
+    return { analysis, model: data.model as string };
   });
