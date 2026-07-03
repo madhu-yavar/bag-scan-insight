@@ -89,11 +89,11 @@ function ScanPage() {
       let analysis: unknown;
       try {
         if (mode === "gemini") {
-          const res = await runAnalyze({
+          const res = (await runAnalyze({
             data: {
               images: uploads.map((u) => ({ view: u.view, data_url: u.data_url })),
             },
-          });
+          })) as { analysis: unknown; model: string };
           analysis = res.analysis;
         } else {
           analysis = await callLocalGemma(gemmaUrl.trim(), uploads);
