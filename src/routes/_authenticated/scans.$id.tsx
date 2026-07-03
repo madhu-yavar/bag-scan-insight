@@ -128,7 +128,7 @@ function AnalysisReport({ analysis }: { analysis: Record<string, unknown> }) {
             </div>
           ))}
         </div>
-        {dims.confidence && (
+        {dims.confidence != null && (
           <p className="mt-3 text-xs text-muted-foreground">Confidence: {String(dims.confidence)}</p>
         )}
       </section>
