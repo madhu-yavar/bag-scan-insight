@@ -1,5 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { Camera, Ruler, Palette, ShieldAlert, Sparkles, ArrowRight } from "lucide-react";
+import { Camera, Ruler, Palette, ShieldAlert, Sparkles } from "lucide-react";
 import { AppHeader } from "@/components/AppHeader";
 
 export const Route = createFileRoute("/")({
@@ -33,16 +33,10 @@ function Landing() {
           </p>
           <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
             <Link
-              to="/scan"
+              to="/scan-local"
               className="inline-flex items-center gap-2 rounded-xl bg-white px-6 py-3 text-sm font-semibold text-primary shadow-brand transition hover:bg-white/95"
             >
               <Camera className="h-4 w-4" /> Start a scan
-            </Link>
-            <Link
-              to="/history"
-              className="inline-flex items-center gap-2 rounded-xl border border-white/40 bg-white/5 px-6 py-3 text-sm font-semibold text-white backdrop-blur transition hover:bg-white/15"
-            >
-              View history <ArrowRight className="h-4 w-4" />
             </Link>
           </div>
         </div>
@@ -50,18 +44,40 @@ function Landing() {
 
       {/* Features */}
       <section className="mx-auto max-w-6xl px-6 py-20">
-        <h2 className="text-center text-3xl font-bold sm:text-4xl">Everything about a bag, in one scan</h2>
+        <h2 className="text-center text-3xl font-bold sm:text-4xl">
+          Everything about a bag, in one scan
+        </h2>
         <p className="mx-auto mt-3 max-w-2xl text-center text-muted-foreground">
-          Four photos are all it takes. The model returns structured metadata you can save,
-          share, or feed into downstream systems.
+          Four photos are all it takes. The model returns structured metadata you can save, share,
+          or feed into downstream systems.
         </p>
 
         <div className="mt-12 grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
           {[
-            { icon: Ruler, title: "Dimensions", body: "Estimated width, height and depth in cm with a size class.", color: "text-primary" },
-            { icon: Palette, title: "Color & texture", body: "Primary/secondary colors and surface material.", color: "text-accent" },
-            { icon: ShieldAlert, title: "Damage report", body: "Scuffs, dents, torn seams and severity.", color: "text-warning" },
-            { icon: Sparkles, title: "Features", body: "Wheels, handles, locks, expansion zippers.", color: "text-brand-purple" },
+            {
+              icon: Ruler,
+              title: "Dimensions",
+              body: "Estimated width, height and depth in cm with a size class.",
+              color: "text-primary",
+            },
+            {
+              icon: Palette,
+              title: "Color & texture",
+              body: "Primary/secondary colors and surface material.",
+              color: "text-accent",
+            },
+            {
+              icon: ShieldAlert,
+              title: "Damage report",
+              body: "Scuffs, dents, torn seams and severity.",
+              color: "text-warning",
+            },
+            {
+              icon: Sparkles,
+              title: "Features",
+              body: "Wheels, handles, locks, expansion zippers.",
+              color: "text-brand-purple",
+            },
           ].map((f) => (
             <div key={f.title} className="rounded-2xl border bg-card p-6 shadow-elevated">
               <f.icon className={`h-8 w-8 ${f.color}`} />
@@ -92,7 +108,7 @@ function Landing() {
           </div>
           <div className="mt-10 text-center">
             <Link
-              to="/scan"
+              to="/scan-local"
               className="inline-flex items-center gap-2 rounded-xl bg-gradient-brand px-6 py-3 text-sm font-semibold text-primary-foreground shadow-brand transition hover:opacity-95"
             >
               <Camera className="h-4 w-4" /> Start scanning
@@ -101,9 +117,7 @@ function Landing() {
         </div>
       </section>
 
-      <footer className="border-t py-8 text-center text-xs text-muted-foreground">
-        BagScan · Built with Lovable
-      </footer>
+      <footer className="border-t py-8 text-center text-xs text-muted-foreground">BagScan</footer>
     </div>
   );
 }

@@ -1,136 +1,268 @@
-import { useRef, useState } from "react";
-import { Camera, Check, RotateCcw, Upload } from "lucide-react";
+import { forwardRef, useCallback, useId, useImperativeHandle, useRef, useState } from "react";
+import { AlertTriangle, Camera, Check, RotateCcw, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { VIEWS, type BaggageView } from "@/lib/baggage-views";
 import { cn } from "@/lib/utils";
 
-export type BaggageView = "front" | "back" | "top" | "side";
-export const VIEWS: { key: BaggageView; title: string; hint: string }[] = [
-  { key: "front", title: "Front", hint: "Face the bag towards you, full body in frame" },
-  { key: "back", title: "Back", hint: "Show straps, back panel and pockets" },
-  { key: "top", title: "Top", hint: "Look down at handles and zippers" },
-  { key: "side", title: "Side", hint: "Profile view — shows depth and wheels" },
-];
-
 type Captured = Partial<Record<BaggageView, string>>;
+export type ViewStatus = "ok" | "review" | "issue";
 
-export function BaggageCapture({
-  images,
-  onChange,
-}: {
+export type BaggageCaptureHandle = {
+  openPicker: (view: BaggageView) => void;
+  retakeView: (view: BaggageView) => void;
+  clearView: (view: BaggageView) => void;
+};
+
+type BaggageCaptureProps = {
   images: Captured;
   onChange: (next: Captured) => void;
-}) {
-  const [activeView, setActiveView] = useState<BaggageView>("front");
-  const fileRefs = useRef<Record<BaggageView, HTMLInputElement | null>>({
-    front: null, back: null, top: null, side: null,
-  });
+  activeView?: BaggageView;
+  onActiveViewChange?: (view: BaggageView) => void;
+  viewStatuses?: Partial<Record<BaggageView, ViewStatus>>;
+};
 
-  const handleFile = async (view: BaggageView, file: File | null) => {
-    if (!file) return;
-    const dataUrl = await resizeAndEncode(file);
-    onChange({ ...images, [view]: dataUrl });
-    const nextEmpty = VIEWS.find((v) => !images[v.key] && v.key !== view);
-    if (nextEmpty) setActiveView(nextEmpty.key);
-  };
+export const BaggageCapture = forwardRef<BaggageCaptureHandle, BaggageCaptureProps>(
+  function BaggageCapture(
+    { images, onChange, activeView, onActiveViewChange, viewStatuses = {} },
+    ref,
+  ) {
+    const [internalActiveView, setInternalActiveView] = useState<BaggageView>("front");
+    const selectedView = activeView ?? internalActiveView;
+    const inputIdPrefix = useId();
+    const fileRefs = useRef<Record<BaggageView, HTMLInputElement | null>>({
+      front: null,
+      back: null,
+      top: null,
+      side: null,
+    });
 
-  const clear = (view: BaggageView) => {
-    const next = { ...images };
-    delete next[view];
-    onChange(next);
-  };
+    const setActiveView = useCallback(
+      (view: BaggageView) => {
+        if (onActiveViewChange) onActiveViewChange(view);
+        else setInternalActiveView(view);
+      },
+      [onActiveViewChange],
+    );
 
-  const active = VIEWS.find((v) => v.key === activeView)!;
+    const resetInput = useCallback((view: BaggageView) => {
+      const input = fileRefs.current[view];
+      if (input) input.value = "";
+    }, []);
 
-  return (
-    <div className="grid gap-6 lg:grid-cols-[1fr_320px]">
-      {/* Preview / capture area */}
-      <div className="overflow-hidden rounded-3xl border bg-card shadow-elevated">
-        <div className="relative aspect-[4/3] w-full bg-gradient-to-br from-secondary to-muted">
-          {images[activeView] ? (
-            <img src={images[activeView]} alt={`${active.title} view`} className="h-full w-full object-contain" />
-          ) : (
-            <div className="flex h-full flex-col items-center justify-center gap-3 p-8 text-center text-muted-foreground">
-              <div className="grid h-16 w-16 place-items-center rounded-2xl bg-gradient-brand text-primary-foreground shadow-brand">
-                <Camera className="h-7 w-7" />
-              </div>
-              <div>
-                <p className="text-lg font-semibold text-foreground">Capture the {active.title.toLowerCase()} view</p>
-                <p className="mt-1 text-sm">{active.hint}</p>
-              </div>
-            </div>
-          )}
-          <div className="absolute left-4 top-4 rounded-full bg-background/85 px-3 py-1 text-xs font-semibold uppercase tracking-wider backdrop-blur">
-            {active.title}
-          </div>
-        </div>
+    const openPicker = useCallback(
+      (view: BaggageView) => {
+        resetInput(view);
+        fileRefs.current[view]?.click();
+      },
+      [resetInput],
+    );
 
-        <div className="flex flex-wrap items-center justify-between gap-3 border-t bg-surface-elevated p-4">
-          <p className="text-sm text-muted-foreground">{active.hint}</p>
-          <div className="flex flex-wrap gap-2">
+    const handleFile = useCallback(
+      async (view: BaggageView, file: File | null) => {
+        if (!file) return;
+        const dataUrl = await resizeAndEncode(file);
+        onChange({ ...images, [view]: dataUrl });
+        const nextEmpty = VIEWS.find((v) => !images[v.key] && v.key !== view);
+        if (nextEmpty) setActiveView(nextEmpty.key);
+      },
+      [images, onChange, setActiveView],
+    );
+
+    const clear = useCallback(
+      (view: BaggageView) => {
+        resetInput(view);
+        const next = { ...images };
+        delete next[view];
+        onChange(next);
+      },
+      [images, onChange, resetInput],
+    );
+
+    const prepareRetake = useCallback(
+      (view: BaggageView) => {
+        setActiveView(view);
+        resetInput(view);
+        const next = { ...images };
+        delete next[view];
+        onChange(next);
+      },
+      [images, onChange, resetInput, setActiveView],
+    );
+
+    const retake = useCallback(
+      (view: BaggageView) => {
+        prepareRetake(view);
+        fileRefs.current[view]?.click();
+      },
+      [prepareRetake],
+    );
+
+    useImperativeHandle(
+      ref,
+      () => ({
+        openPicker,
+        retakeView: retake,
+        clearView: clear,
+      }),
+      [clear, openPicker, retake],
+    );
+
+    const active = VIEWS.find((v) => v.key === selectedView)!;
+    const activeStatus = viewStatuses[selectedView];
+
+    return (
+      <div className="grid gap-6 lg:grid-cols-[1fr_320px]">
+        <div className="sr-only">
+          {VIEWS.map((view) => (
             <input
-              ref={(el) => { fileRefs.current[activeView] = el; }}
+              key={view.key}
+              id={`${inputIdPrefix}-${view.key}`}
+              ref={(el) => {
+                fileRefs.current[view.key] = el;
+              }}
               type="file"
               accept="image/*"
               capture="environment"
-              className="hidden"
-              onChange={(e) => handleFile(activeView, e.target.files?.[0] ?? null)}
+              onChange={(event) => {
+                const file = event.currentTarget.files?.[0] ?? null;
+                event.currentTarget.value = "";
+                void handleFile(view.key, file);
+              }}
             />
-            {images[activeView] && (
-              <Button variant="outline" size="sm" onClick={() => clear(activeView)}>
-                <RotateCcw className="mr-1.5 h-4 w-4" /> Retake
-              </Button>
+          ))}
+        </div>
+
+        {/* Preview / capture area */}
+        <div className="overflow-hidden rounded-3xl border bg-card shadow-elevated">
+          <div className="relative aspect-[4/3] w-full bg-gradient-to-br from-secondary to-muted">
+            {images[selectedView] ? (
+              <img
+                src={images[selectedView]}
+                alt={`${active.title} view`}
+                className="h-full w-full object-contain"
+              />
+            ) : (
+              <div className="flex h-full flex-col items-center justify-center gap-3 p-8 text-center text-muted-foreground">
+                <div className="grid h-16 w-16 place-items-center rounded-2xl bg-gradient-brand text-primary-foreground shadow-brand">
+                  <Camera className="h-7 w-7" />
+                </div>
+                <div>
+                  <p className="text-lg font-semibold text-foreground">
+                    Capture the {active.title.toLowerCase()} view
+                  </p>
+                  <p className="mt-1 text-sm">{active.hint}</p>
+                </div>
+              </div>
             )}
-            <Button
-              size="sm"
-              className="bg-gradient-brand text-primary-foreground shadow-brand hover:opacity-95"
-              onClick={() => fileRefs.current[activeView]?.click()}
-            >
-              <Camera className="mr-1.5 h-4 w-4" />
-              {images[activeView] ? "Replace photo" : "Take photo"}
-            </Button>
+            <div className="absolute left-4 top-4 rounded-full bg-background/85 px-3 py-1 text-xs font-semibold uppercase tracking-wider backdrop-blur">
+              {active.title}
+            </div>
+            {activeStatus === "issue" || activeStatus === "review" ? (
+              <div
+                className={`absolute right-4 top-4 rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-wider backdrop-blur ${
+                  activeStatus === "issue"
+                    ? "bg-destructive/90 text-destructive-foreground"
+                    : "bg-warning/90 text-warning-foreground"
+                }`}
+              >
+                {activeStatus === "issue" ? "Retake" : "Review"}
+              </div>
+            ) : null}
+          </div>
+
+          <div className="flex flex-wrap items-center justify-between gap-3 border-t bg-surface-elevated p-4">
+            <p className="text-sm text-muted-foreground">{active.hint}</p>
+            <div className="flex flex-wrap gap-2">
+              {images[selectedView] && (
+                <Button variant="outline" size="sm" asChild>
+                  <label
+                    htmlFor={`${inputIdPrefix}-${selectedView}`}
+                    onClick={() => prepareRetake(selectedView)}
+                  >
+                    <RotateCcw className="mr-1.5 h-4 w-4" /> Retake
+                  </label>
+                </Button>
+              )}
+              <Button
+                size="sm"
+                className="bg-gradient-brand text-primary-foreground shadow-brand hover:opacity-95"
+                asChild
+              >
+                <label
+                  htmlFor={`${inputIdPrefix}-${selectedView}`}
+                  onClick={() => resetInput(selectedView)}
+                >
+                  <Camera className="mr-1.5 h-4 w-4" />
+                  {images[selectedView] ? "Replace photo" : "Take photo"}
+                </label>
+              </Button>
+            </div>
           </div>
         </div>
-      </div>
 
-      {/* View picker */}
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-1">
-        {VIEWS.map((v) => {
-          const has = Boolean(images[v.key]);
-          const isActive = v.key === activeView;
-          return (
-            <button
-              key={v.key}
-              type="button"
-              onClick={() => setActiveView(v.key)}
-              className={cn(
-                "group relative flex items-center gap-3 rounded-2xl border p-3 text-left transition",
-                isActive ? "border-primary bg-primary/5 shadow-brand" : "bg-card hover:border-primary/60",
-              )}
-            >
-              <div className={cn(
-                "grid h-16 w-16 shrink-0 place-items-center overflow-hidden rounded-xl border",
-                has ? "bg-background" : "bg-muted",
-              )}>
-                {has ? (
-                  <img src={images[v.key]} alt="" className="h-full w-full object-cover" />
-                ) : (
-                  <Upload className="h-5 w-5 text-muted-foreground" />
+        {/* View picker */}
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-1">
+          {VIEWS.map((v) => {
+            const has = Boolean(images[v.key]);
+            const isActive = v.key === selectedView;
+            const status = viewStatuses[v.key];
+            const statusClass =
+              status === "issue"
+                ? "border-destructive bg-destructive/5"
+                : status === "review"
+                  ? "border-warning bg-warning/5"
+                  : isActive
+                    ? "border-primary bg-primary/5 shadow-brand"
+                    : "bg-card hover:border-primary/60";
+            return (
+              <button
+                key={v.key}
+                type="button"
+                onClick={() => setActiveView(v.key)}
+                className={cn(
+                  "group relative flex items-center gap-3 rounded-2xl border p-3 text-left transition",
+                  statusClass,
                 )}
-              </div>
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-1.5">
-                  <span className="font-semibold">{v.title}</span>
-                  {has && <Check className="h-4 w-4 text-accent" />}
+              >
+                <div
+                  className={cn(
+                    "grid h-16 w-16 shrink-0 place-items-center overflow-hidden rounded-xl border",
+                    has ? "bg-background" : "bg-muted",
+                  )}
+                >
+                  {has ? (
+                    <img src={images[v.key]} alt="" className="h-full w-full object-cover" />
+                  ) : (
+                    <Upload className="h-5 w-5 text-muted-foreground" />
+                  )}
                 </div>
-                <p className="truncate text-xs text-muted-foreground">{v.hint}</p>
-              </div>
-            </button>
-          );
-        })}
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-1.5">
+                    <span className="font-semibold">{v.title}</span>
+                    {status === "issue" || status === "review" ? (
+                      <AlertTriangle
+                        className={`h-4 w-4 ${status === "issue" ? "text-destructive" : "text-warning"}`}
+                      />
+                    ) : (
+                      has && <Check className="h-4 w-4 text-accent" />
+                    )}
+                  </div>
+                  <p className="truncate text-xs text-muted-foreground">
+                    {status === "issue"
+                      ? "Needs retake"
+                      : status === "review"
+                        ? "Review photo"
+                        : v.hint}
+                  </p>
+                </div>
+              </button>
+            );
+          })}
+        </div>
       </div>
-    </div>
-  );
-}
+    );
+  },
+);
 
 async function resizeAndEncode(file: File, maxDim = 1024, quality = 0.82): Promise<string> {
   const bitmap = await createImageBitmap(file);
@@ -138,7 +270,8 @@ async function resizeAndEncode(file: File, maxDim = 1024, quality = 0.82): Promi
   const w = Math.round(bitmap.width * scale);
   const h = Math.round(bitmap.height * scale);
   const canvas = document.createElement("canvas");
-  canvas.width = w; canvas.height = h;
+  canvas.width = w;
+  canvas.height = h;
   const ctx = canvas.getContext("2d");
   if (!ctx) throw new Error("Canvas not supported");
   ctx.drawImage(bitmap, 0, 0, w, h);

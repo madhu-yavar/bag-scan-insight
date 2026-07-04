@@ -10,9 +10,12 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as SitemapDotxmlRouteImport } from './routes/sitemap[.]xml'
+import { Route as ScanLocalRouteImport } from './routes/scan-local'
+import { Route as ReportsLocalRouteImport } from './routes/reports-local'
 import { Route as AuthRouteImport } from './routes/auth'
 import { Route as AuthenticatedRouteRouteImport } from './routes/_authenticated/route'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as ReportsLocalIdRouteImport } from './routes/reports-local.$id'
 import { Route as AuthenticatedScanRouteImport } from './routes/_authenticated/scan'
 import { Route as AuthenticatedHistoryRouteImport } from './routes/_authenticated/history'
 import { Route as AuthenticatedScansIdRouteImport } from './routes/_authenticated/scans.$id'
@@ -20,6 +23,16 @@ import { Route as AuthenticatedScansIdRouteImport } from './routes/_authenticate
 const SitemapDotxmlRoute = SitemapDotxmlRouteImport.update({
   id: '/sitemap.xml',
   path: '/sitemap.xml',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ScanLocalRoute = ScanLocalRouteImport.update({
+  id: '/scan-local',
+  path: '/scan-local',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ReportsLocalRoute = ReportsLocalRouteImport.update({
+  id: '/reports-local',
+  path: '/reports-local',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AuthRoute = AuthRouteImport.update({
@@ -35,6 +48,11 @@ const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => rootRouteImport,
+} as any)
+const ReportsLocalIdRoute = ReportsLocalIdRouteImport.update({
+  id: '/$id',
+  path: '/$id',
+  getParentRoute: () => ReportsLocalRoute,
 } as any)
 const AuthenticatedScanRoute = AuthenticatedScanRouteImport.update({
   id: '/scan',
@@ -55,17 +73,23 @@ const AuthenticatedScansIdRoute = AuthenticatedScansIdRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/auth': typeof AuthRoute
+  '/reports-local': typeof ReportsLocalRouteWithChildren
+  '/scan-local': typeof ScanLocalRoute
   '/sitemap.xml': typeof SitemapDotxmlRoute
   '/history': typeof AuthenticatedHistoryRoute
   '/scan': typeof AuthenticatedScanRoute
+  '/reports-local/$id': typeof ReportsLocalIdRoute
   '/scans/$id': typeof AuthenticatedScansIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/auth': typeof AuthRoute
+  '/reports-local': typeof ReportsLocalRouteWithChildren
+  '/scan-local': typeof ScanLocalRoute
   '/sitemap.xml': typeof SitemapDotxmlRoute
   '/history': typeof AuthenticatedHistoryRoute
   '/scan': typeof AuthenticatedScanRoute
+  '/reports-local/$id': typeof ReportsLocalIdRoute
   '/scans/$id': typeof AuthenticatedScansIdRoute
 }
 export interface FileRoutesById {
@@ -73,9 +97,12 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/_authenticated': typeof AuthenticatedRouteRouteWithChildren
   '/auth': typeof AuthRoute
+  '/reports-local': typeof ReportsLocalRouteWithChildren
+  '/scan-local': typeof ScanLocalRoute
   '/sitemap.xml': typeof SitemapDotxmlRoute
   '/_authenticated/history': typeof AuthenticatedHistoryRoute
   '/_authenticated/scan': typeof AuthenticatedScanRoute
+  '/reports-local/$id': typeof ReportsLocalIdRoute
   '/_authenticated/scans/$id': typeof AuthenticatedScansIdRoute
 }
 export interface FileRouteTypes {
@@ -83,20 +110,35 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/auth'
+    | '/reports-local'
+    | '/scan-local'
     | '/sitemap.xml'
     | '/history'
     | '/scan'
+    | '/reports-local/$id'
     | '/scans/$id'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/auth' | '/sitemap.xml' | '/history' | '/scan' | '/scans/$id'
+  to:
+    | '/'
+    | '/auth'
+    | '/reports-local'
+    | '/scan-local'
+    | '/sitemap.xml'
+    | '/history'
+    | '/scan'
+    | '/reports-local/$id'
+    | '/scans/$id'
   id:
     | '__root__'
     | '/'
     | '/_authenticated'
     | '/auth'
+    | '/reports-local'
+    | '/scan-local'
     | '/sitemap.xml'
     | '/_authenticated/history'
     | '/_authenticated/scan'
+    | '/reports-local/$id'
     | '/_authenticated/scans/$id'
   fileRoutesById: FileRoutesById
 }
@@ -104,6 +146,8 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AuthenticatedRouteRoute: typeof AuthenticatedRouteRouteWithChildren
   AuthRoute: typeof AuthRoute
+  ReportsLocalRoute: typeof ReportsLocalRouteWithChildren
+  ScanLocalRoute: typeof ScanLocalRoute
   SitemapDotxmlRoute: typeof SitemapDotxmlRoute
 }
 
@@ -114,6 +158,20 @@ declare module '@tanstack/react-router' {
       path: '/sitemap.xml'
       fullPath: '/sitemap.xml'
       preLoaderRoute: typeof SitemapDotxmlRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/scan-local': {
+      id: '/scan-local'
+      path: '/scan-local'
+      fullPath: '/scan-local'
+      preLoaderRoute: typeof ScanLocalRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/reports-local': {
+      id: '/reports-local'
+      path: '/reports-local'
+      fullPath: '/reports-local'
+      preLoaderRoute: typeof ReportsLocalRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/auth': {
@@ -136,6 +194,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
+    }
+    '/reports-local/$id': {
+      id: '/reports-local/$id'
+      path: '/$id'
+      fullPath: '/reports-local/$id'
+      preLoaderRoute: typeof ReportsLocalIdRouteImport
+      parentRoute: typeof ReportsLocalRoute
     }
     '/_authenticated/scan': {
       id: '/_authenticated/scan'
@@ -176,12 +241,36 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
 const AuthenticatedRouteRouteWithChildren =
   AuthenticatedRouteRoute._addFileChildren(AuthenticatedRouteRouteChildren)
 
+interface ReportsLocalRouteChildren {
+  ReportsLocalIdRoute: typeof ReportsLocalIdRoute
+}
+
+const ReportsLocalRouteChildren: ReportsLocalRouteChildren = {
+  ReportsLocalIdRoute: ReportsLocalIdRoute,
+}
+
+const ReportsLocalRouteWithChildren = ReportsLocalRoute._addFileChildren(
+  ReportsLocalRouteChildren,
+)
+
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AuthenticatedRouteRoute: AuthenticatedRouteRouteWithChildren,
   AuthRoute: AuthRoute,
+  ReportsLocalRoute: ReportsLocalRouteWithChildren,
+  ScanLocalRoute: ScanLocalRoute,
   SitemapDotxmlRoute: SitemapDotxmlRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
+
+import type { getRouter } from './router.tsx'
+import type { startInstance } from './start.ts'
+declare module '@tanstack/react-start' {
+  interface Register {
+    ssr: true
+    router: Awaited<ReturnType<typeof getRouter>>
+    config: Awaited<ReturnType<typeof startInstance.getOptions>>
+  }
+}

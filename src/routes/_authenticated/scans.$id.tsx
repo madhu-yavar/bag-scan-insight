@@ -2,7 +2,7 @@ import { createFileRoute, Link, useParams } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft, Loader2 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
-import { VIEWS } from "@/components/BaggageCapture";
+import { VIEWS } from "@/lib/baggage-views";
 
 export const Route = createFileRoute("/_authenticated/scans/$id")({
   head: () => ({
@@ -28,7 +28,9 @@ function ScanDetail() {
       if (iErr) throw iErr;
       const signed = await Promise.all(
         (imgs ?? []).map(async (i) => {
-          const { data: s } = await supabase.storage.from("baggage-images").createSignedUrl(i.storage_path, 3600);
+          const { data: s } = await supabase.storage
+            .from("baggage-images")
+            .createSignedUrl(i.storage_path, 3600);
           return { view: i.view as string, url: s?.signedUrl ?? "" };
         }),
       );
@@ -36,17 +38,32 @@ function ScanDetail() {
     },
   });
 
-  if (isLoading) return <div className="flex min-h-[60vh] items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-primary" /></div>;
-  if (!data?.scan) return <div className="mx-auto max-w-3xl px-6 py-16 text-center text-muted-foreground">Scan not found.</div>;
+  if (isLoading)
+    return (
+      <div className="flex min-h-[60vh] items-center justify-center">
+        <Loader2 className="h-6 w-6 animate-spin text-primary" />
+      </div>
+    );
+  if (!data?.scan)
+    return (
+      <div className="mx-auto max-w-3xl px-6 py-16 text-center text-muted-foreground">
+        Scan not found.
+      </div>
+    );
 
   const { scan, images } = data;
   const a = (scan.analysis as Record<string, unknown> | null) ?? null;
   const imgByView: Record<string, string> = {};
-  images.forEach((i) => { imgByView[i.view] = i.url; });
+  images.forEach((i) => {
+    imgByView[i.view] = i.url;
+  });
 
   return (
     <main className="mx-auto max-w-6xl px-4 py-8 sm:px-6 sm:py-12">
-      <Link to="/history" className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
+      <Link
+        to="/history"
+        className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
+      >
         <ArrowLeft className="h-4 w-4" /> Back to history
       </Link>
 
@@ -54,7 +71,8 @@ function ScanDetail() {
         <div className="min-w-0">
           <h1 className="truncate text-3xl font-bold sm:text-4xl">{scan.name}</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            {new Date(scan.created_at).toLocaleString()} · model: {scan.model} · status: {scan.status}
+            {new Date(scan.created_at).toLocaleString()} · model: {scan.model} · status:{" "}
+            {scan.status}
           </p>
         </div>
       </div>
@@ -66,7 +84,9 @@ function ScanDetail() {
               {imgByView[v.key] ? (
                 <img src={imgByView[v.key]} alt={v.title} className="h-full w-full object-cover" />
               ) : (
-                <div className="grid h-full place-items-center text-xs text-muted-foreground">no image</div>
+                <div className="grid h-full place-items-center text-xs text-muted-foreground">
+                  no image
+                </div>
               )}
             </div>
             <div className="p-3 text-sm font-semibold">{v.title}</div>
@@ -129,24 +149,41 @@ function AnalysisReport({ analysis }: { analysis: Record<string, unknown> }) {
           ))}
         </div>
         {dims.confidence != null && (
-          <p className="mt-3 text-xs text-muted-foreground">Confidence: {String(dims.confidence)}</p>
+          <p className="mt-3 text-xs text-muted-foreground">
+            Confidence: {String(dims.confidence)}
+          </p>
         )}
       </section>
 
       <section className="rounded-2xl border bg-card p-6 shadow-elevated">
         <h2 className="text-lg font-semibold">Colors</h2>
         <div className="mt-3 space-y-2 text-sm">
-          <div><span className="text-muted-foreground">Primary: </span>{String(colors.primary ?? "—")}</div>
-          <div><span className="text-muted-foreground">Secondary: </span>{String(colors.secondary ?? "—")}</div>
+          <div>
+            <span className="text-muted-foreground">Primary: </span>
+            {String(colors.primary ?? "—")}
+          </div>
+          <div>
+            <span className="text-muted-foreground">Secondary: </span>
+            {String(colors.secondary ?? "—")}
+          </div>
         </div>
       </section>
 
       <section className="rounded-2xl border bg-card p-6 shadow-elevated">
         <h2 className="text-lg font-semibold">Wheels & handles</h2>
         <div className="mt-3 space-y-2 text-sm">
-          <div><span className="text-muted-foreground">Wheel count: </span>{wheels.count != null ? String(wheels.count) : "—"}</div>
-          <div><span className="text-muted-foreground">Wheel type: </span>{String(wheels.type ?? "—")}</div>
-          <div><span className="text-muted-foreground">Handles: </span>{handles.length ? handles.join(", ") : "—"}</div>
+          <div>
+            <span className="text-muted-foreground">Wheel count: </span>
+            {wheels.count != null ? String(wheels.count) : "—"}
+          </div>
+          <div>
+            <span className="text-muted-foreground">Wheel type: </span>
+            {String(wheels.type ?? "—")}
+          </div>
+          <div>
+            <span className="text-muted-foreground">Handles: </span>
+            {handles.length ? handles.join(", ") : "—"}
+          </div>
         </div>
       </section>
 
@@ -157,7 +194,12 @@ function AnalysisReport({ analysis }: { analysis: Record<string, unknown> }) {
         ) : (
           <div className="mt-3 flex flex-wrap gap-2">
             {features.map((f) => (
-              <span key={f} className="rounded-full bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary">{f}</span>
+              <span
+                key={f}
+                className="rounded-full bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary"
+              >
+                {f}
+              </span>
             ))}
           </div>
         )}
@@ -172,7 +214,9 @@ function AnalysisReport({ analysis }: { analysis: Record<string, unknown> }) {
             {damage.map((d, i) => (
               <li key={i} className="flex flex-wrap items-start justify-between gap-3 py-3 text-sm">
                 <div className="min-w-0">
-                  <div className="font-semibold">{String(d.type ?? "damage")} · {String(d.location ?? "—")}</div>
+                  <div className="font-semibold">
+                    {String(d.type ?? "damage")} · {String(d.location ?? "—")}
+                  </div>
                   <p className="text-muted-foreground">{String(d.description ?? "")}</p>
                 </div>
                 <SeverityBadge severity={String(d.severity ?? "minor")} />
@@ -200,5 +244,11 @@ function SeverityBadge({ severity }: { severity: string }) {
     moderate: "bg-warning/15 text-warning-foreground",
     severe: "bg-destructive/15 text-destructive",
   };
-  return <span className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold ${map[severity] ?? "bg-muted text-muted-foreground"}`}>{severity}</span>;
+  return (
+    <span
+      className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold ${map[severity] ?? "bg-muted text-muted-foreground"}`}
+    >
+      {severity}
+    </span>
+  );
 }

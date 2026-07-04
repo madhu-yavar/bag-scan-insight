@@ -9,15 +9,19 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
-import { BaggageCapture, VIEWS, type BaggageView } from "@/components/BaggageCapture";
+import { BaggageCapture } from "@/components/BaggageCapture";
 import { supabase } from "@/integrations/supabase/client";
+import { VIEWS, type BaggageView } from "@/lib/baggage-views";
 import { analyzeBaggage } from "@/lib/scans.functions";
 
 export const Route = createFileRoute("/_authenticated/scan")({
   head: () => ({
     meta: [
       { title: "New scan — BagScan" },
-      { name: "description", content: "Capture 4 photos of a bag and run AI analysis to extract metadata." },
+      {
+        name: "description",
+        content: "Capture 4 photos of a bag and run AI analysis to extract metadata.",
+      },
     ],
   }),
   component: ScanPage,
@@ -83,7 +87,12 @@ function ScanPage() {
       );
 
       await supabase.from("scan_images").insert(
-        uploads.map((u) => ({ scan_id: scan.id, user_id: uid, view: u.view, storage_path: u.path })),
+        uploads.map((u) => ({
+          scan_id: scan.id,
+          user_id: uid,
+          view: u.view,
+          storage_path: u.path,
+        })),
       );
 
       let analysis: unknown;
@@ -98,7 +107,10 @@ function ScanPage() {
         } else {
           analysis = await callLocalGemma(gemmaUrl.trim(), uploads);
         }
-        await supabase.from("scans").update({ status: "completed", analysis: analysis as never }).eq("id", scan.id);
+        await supabase
+          .from("scans")
+          .update({ status: "completed", analysis: analysis as never })
+          .eq("id", scan.id);
         toast.success("Analysis complete");
         router.navigate({ to: "/scans/$id", params: { id: scan.id } });
       } catch (err) {
@@ -130,31 +142,52 @@ function ScanPage() {
           <div className="mt-4 grid gap-4">
             <div className="grid gap-1.5">
               <Label htmlFor="name">Label (optional)</Label>
-              <Input id="name" placeholder="e.g. Away Bigger Carry-On" value={name} onChange={(e) => setName(e.target.value)} />
+              <Input
+                id="name"
+                placeholder="e.g. Away Bigger Carry-On"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+              />
             </div>
             <div className="grid gap-1.5">
               <Label htmlFor="notes">Notes (optional)</Label>
-              <Textarea id="notes" placeholder="Anything worth remembering about this bag" value={notes} onChange={(e) => setNotes(e.target.value)} />
+              <Textarea
+                id="notes"
+                placeholder="Anything worth remembering about this bag"
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+              />
             </div>
           </div>
         </div>
 
         <div className="rounded-3xl border bg-card p-6 shadow-elevated">
           <h2 className="text-lg font-semibold">Model</h2>
-          <RadioGroup value={mode} onValueChange={(v) => setMode(v as Mode)} className="mt-4 grid gap-3">
+          <RadioGroup
+            value={mode}
+            onValueChange={(v) => setMode(v as Mode)}
+            className="mt-4 grid gap-3"
+          >
             <label className="flex cursor-pointer items-start gap-3 rounded-xl border p-3 hover:border-primary/60">
               <RadioGroupItem value="gemini" id="m-gemini" className="mt-1" />
               <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-1.5 font-semibold"><Sparkles className="h-4 w-4 text-primary" /> Gemini (cloud)</div>
-                <p className="mt-1 text-xs text-muted-foreground">Fast, no setup. Runs on Lovable AI.</p>
+                <div className="flex items-center gap-1.5 font-semibold">
+                  <Sparkles className="h-4 w-4 text-primary" /> Gemini (cloud)
+                </div>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Fast, no setup. Runs on Lovable AI.
+                </p>
               </div>
             </label>
             <label className="flex cursor-pointer items-start gap-3 rounded-xl border p-3 hover:border-primary/60">
               <RadioGroupItem value="gemma" id="m-gemma" className="mt-1" />
               <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-1.5 font-semibold"><Server className="h-4 w-4 text-accent" /> Gemma (local)</div>
+                <div className="flex items-center gap-1.5 font-semibold">
+                  <Server className="h-4 w-4 text-accent" /> Gemma (local)
+                </div>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  Point at your local multimodal endpoint. Must accept an OpenAI-style <code>chat/completions</code> body.
+                  Point at your local multimodal endpoint. Must accept an OpenAI-style{" "}
+                  <code>chat/completions</code> body.
                 </p>
                 {mode === "gemma" && (
                   <Input
@@ -173,8 +206,16 @@ function ScanPage() {
             disabled={!canSubmit}
             onClick={analyze}
           >
-            {submitting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
-            {submitting ? "Analyzing…" : allCaptured ? "Analyze baggage" : `Capture all 4 views (${Object.keys(images).length}/4)`}
+            {submitting ? (
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            ) : (
+              <Sparkles className="mr-2 h-4 w-4" />
+            )}
+            {submitting
+              ? "Analyzing…"
+              : allCaptured
+                ? "Analyze baggage"
+                : `Capture all 4 views (${Object.keys(images).length}/4)`}
           </Button>
         </div>
       </div>
@@ -186,9 +227,7 @@ async function callLocalGemma(
   endpoint: string,
   uploads: { view: BaggageView; data_url: string }[],
 ): Promise<unknown> {
-  const content: Array<Record<string, unknown>> = [
-    { type: "text", text: SYSTEM_PROMPT },
-  ];
+  const content: Array<Record<string, unknown>> = [{ type: "text", text: SYSTEM_PROMPT }];
   for (const u of uploads) {
     content.push({ type: "text", text: `View: ${u.view}` });
     content.push({ type: "image_url", image_url: { url: u.data_url } });
@@ -205,8 +244,14 @@ async function callLocalGemma(
   if (!res.ok) throw new Error(`Local Gemma endpoint returned ${res.status}`);
   const json = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
   const raw = json.choices?.[0]?.message?.content ?? "";
-  const cleaned = raw.trim().replace(/^```(?:json)?\s*/i, "").replace(/```$/, "").trim();
-  try { return JSON.parse(cleaned); } catch {
+  const cleaned = raw
+    .trim()
+    .replace(/^```(?:json)?\s*/i, "")
+    .replace(/```$/, "")
+    .trim();
+  try {
+    return JSON.parse(cleaned);
+  } catch {
     const m = cleaned.match(/\{[\s\S]*\}/);
     if (m) return JSON.parse(m[0]);
     throw new Error("Local Gemma did not return JSON");

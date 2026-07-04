@@ -12,7 +12,7 @@ import { Toaster } from "sonner";
 
 import appCss from "../styles.css?url";
 import { reportLovableError } from "../lib/lovable-error-reporting";
-import { supabase } from "@/integrations/supabase/client";
+import { hasSupabaseConfig, supabase } from "@/integrations/supabase/client";
 
 function NotFoundComponent() {
   return (
@@ -46,10 +46,20 @@ function ErrorComponent({ error, reset }: { error: Error; reset: () => void }) {
         <p className="mt-2 text-sm text-muted-foreground">Something went wrong. Try again.</p>
         <div className="mt-6 flex flex-wrap justify-center gap-2">
           <button
-            onClick={() => { router.invalidate(); reset(); }}
+            onClick={() => {
+              router.invalidate();
+              reset();
+            }}
             className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:opacity-90"
-          >Try again</button>
-          <a href="/" className="rounded-md border border-input bg-background px-4 py-2 text-sm font-medium hover:bg-accent hover:text-accent-foreground">Go home</a>
+          >
+            Try again
+          </button>
+          <a
+            href="/"
+            className="rounded-md border border-input bg-background px-4 py-2 text-sm font-medium hover:bg-accent hover:text-accent-foreground"
+          >
+            Go home
+          </a>
         </div>
       </div>
     </div>
@@ -62,23 +72,46 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
       { title: "BagScan" },
-      { name: "description", content: "Capture front, back, top and side photos of any baggage and let AI extract dimensions, color, texture, wheels and damage in seconds." },
+      {
+        name: "description",
+        content:
+          "Capture front, back, top and side photos of any baggage and let AI extract dimensions, color, texture, wheels and damage in seconds.",
+      },
       { name: "author", content: "BagScan" },
       { property: "og:title", content: "BagScan" },
-      { property: "og:description", content: "Capture front, back, top and side photos of any baggage and let AI extract dimensions, color, texture, wheels and damage in seconds." },
+      {
+        property: "og:description",
+        content:
+          "Capture front, back, top and side photos of any baggage and let AI extract dimensions, color, texture, wheels and damage in seconds.",
+      },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
       { name: "twitter:title", content: "BagScan" },
-      { name: "twitter:description", content: "Capture front, back, top and side photos of any baggage and let AI extract dimensions, color, texture, wheels and damage in seconds." },
-      { property: "og:image", content: "https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/c0650769-0f8b-473b-85d9-dae8cefc80bb/id-preview-066d5925--a702f53a-238f-4e6c-8308-3ae4c985ec09.lovable.app-1783059294223.png" },
-      { name: "twitter:image", content: "https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/c0650769-0f8b-473b-85d9-dae8cefc80bb/id-preview-066d5925--a702f53a-238f-4e6c-8308-3ae4c985ec09.lovable.app-1783059294223.png" },
+      {
+        name: "twitter:description",
+        content:
+          "Capture front, back, top and side photos of any baggage and let AI extract dimensions, color, texture, wheels and damage in seconds.",
+      },
+      {
+        property: "og:image",
+        content:
+          "https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/c0650769-0f8b-473b-85d9-dae8cefc80bb/id-preview-066d5925--a702f53a-238f-4e6c-8308-3ae4c985ec09.lovable.app-1783059294223.png",
+      },
+      {
+        name: "twitter:image",
+        content:
+          "https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/c0650769-0f8b-473b-85d9-dae8cefc80bb/id-preview-066d5925--a702f53a-238f-4e6c-8308-3ae4c985ec09.lovable.app-1783059294223.png",
+      },
     ],
     links: [
       { rel: "stylesheet", href: appCss },
       { rel: "icon", href: "/favicon.ico", type: "image/x-icon" },
       { rel: "preconnect", href: "https://fonts.googleapis.com" },
       { rel: "preconnect", href: "https://fonts.gstatic.com", crossOrigin: "anonymous" },
-      { rel: "stylesheet", href: "https://fonts.googleapis.com/css2?family=Montserrat:wght@500;600;700;800&family=Roboto:wght@400;500;700&display=swap" },
+      {
+        rel: "stylesheet",
+        href: "https://fonts.googleapis.com/css2?family=Montserrat:wght@500;600;700;800&family=Roboto:wght@400;500;700&display=swap",
+      },
     ],
   }),
   shellComponent: RootShell,
@@ -90,8 +123,13 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
 function RootShell({ children }: { children: ReactNode }) {
   return (
     <html lang="en">
-      <head><HeadContent /></head>
-      <body>{children}<Scripts /></body>
+      <head>
+        <HeadContent />
+      </head>
+      <body>
+        {children}
+        <Scripts />
+      </body>
     </html>
   );
 }
@@ -101,6 +139,8 @@ function RootComponent() {
   const router = useRouter();
 
   useEffect(() => {
+    if (!hasSupabaseConfig()) return;
+
     const { data: sub } = supabase.auth.onAuthStateChange((event) => {
       if (event !== "SIGNED_IN" && event !== "SIGNED_OUT" && event !== "USER_UPDATED") return;
       router.invalidate();
