@@ -16,6 +16,7 @@ import { Route as AuthRouteImport } from './routes/auth'
 import { Route as AuthenticatedRouteRouteImport } from './routes/_authenticated/route'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as ReportsLocalIdRouteImport } from './routes/reports-local.$id'
+import { Route as AuthCallbackRouteImport } from './routes/auth.callback'
 import { Route as AuthenticatedScanRouteImport } from './routes/_authenticated/scan'
 import { Route as AuthenticatedHistoryRouteImport } from './routes/_authenticated/history'
 import { Route as AuthenticatedScansIdRouteImport } from './routes/_authenticated/scans.$id'
@@ -54,6 +55,11 @@ const ReportsLocalIdRoute = ReportsLocalIdRouteImport.update({
   path: '/$id',
   getParentRoute: () => ReportsLocalRoute,
 } as any)
+const AuthCallbackRoute = AuthCallbackRouteImport.update({
+  id: '/callback',
+  path: '/callback',
+  getParentRoute: () => AuthRoute,
+} as any)
 const AuthenticatedScanRoute = AuthenticatedScanRouteImport.update({
   id: '/scan',
   path: '/scan',
@@ -72,23 +78,25 @@ const AuthenticatedScansIdRoute = AuthenticatedScansIdRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
-  '/auth': typeof AuthRoute
+  '/auth': typeof AuthRouteWithChildren
   '/reports-local': typeof ReportsLocalRouteWithChildren
   '/scan-local': typeof ScanLocalRoute
   '/sitemap.xml': typeof SitemapDotxmlRoute
   '/history': typeof AuthenticatedHistoryRoute
   '/scan': typeof AuthenticatedScanRoute
+  '/auth/callback': typeof AuthCallbackRoute
   '/reports-local/$id': typeof ReportsLocalIdRoute
   '/scans/$id': typeof AuthenticatedScansIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
-  '/auth': typeof AuthRoute
+  '/auth': typeof AuthRouteWithChildren
   '/reports-local': typeof ReportsLocalRouteWithChildren
   '/scan-local': typeof ScanLocalRoute
   '/sitemap.xml': typeof SitemapDotxmlRoute
   '/history': typeof AuthenticatedHistoryRoute
   '/scan': typeof AuthenticatedScanRoute
+  '/auth/callback': typeof AuthCallbackRoute
   '/reports-local/$id': typeof ReportsLocalIdRoute
   '/scans/$id': typeof AuthenticatedScansIdRoute
 }
@@ -96,12 +104,13 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/_authenticated': typeof AuthenticatedRouteRouteWithChildren
-  '/auth': typeof AuthRoute
+  '/auth': typeof AuthRouteWithChildren
   '/reports-local': typeof ReportsLocalRouteWithChildren
   '/scan-local': typeof ScanLocalRoute
   '/sitemap.xml': typeof SitemapDotxmlRoute
   '/_authenticated/history': typeof AuthenticatedHistoryRoute
   '/_authenticated/scan': typeof AuthenticatedScanRoute
+  '/auth/callback': typeof AuthCallbackRoute
   '/reports-local/$id': typeof ReportsLocalIdRoute
   '/_authenticated/scans/$id': typeof AuthenticatedScansIdRoute
 }
@@ -115,6 +124,7 @@ export interface FileRouteTypes {
     | '/sitemap.xml'
     | '/history'
     | '/scan'
+    | '/auth/callback'
     | '/reports-local/$id'
     | '/scans/$id'
   fileRoutesByTo: FileRoutesByTo
@@ -126,6 +136,7 @@ export interface FileRouteTypes {
     | '/sitemap.xml'
     | '/history'
     | '/scan'
+    | '/auth/callback'
     | '/reports-local/$id'
     | '/scans/$id'
   id:
@@ -138,6 +149,7 @@ export interface FileRouteTypes {
     | '/sitemap.xml'
     | '/_authenticated/history'
     | '/_authenticated/scan'
+    | '/auth/callback'
     | '/reports-local/$id'
     | '/_authenticated/scans/$id'
   fileRoutesById: FileRoutesById
@@ -145,7 +157,7 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AuthenticatedRouteRoute: typeof AuthenticatedRouteRouteWithChildren
-  AuthRoute: typeof AuthRoute
+  AuthRoute: typeof AuthRouteWithChildren
   ReportsLocalRoute: typeof ReportsLocalRouteWithChildren
   ScanLocalRoute: typeof ScanLocalRoute
   SitemapDotxmlRoute: typeof SitemapDotxmlRoute
@@ -202,6 +214,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ReportsLocalIdRouteImport
       parentRoute: typeof ReportsLocalRoute
     }
+    '/auth/callback': {
+      id: '/auth/callback'
+      path: '/callback'
+      fullPath: '/auth/callback'
+      preLoaderRoute: typeof AuthCallbackRouteImport
+      parentRoute: typeof AuthRoute
+    }
     '/_authenticated/scan': {
       id: '/_authenticated/scan'
       path: '/scan'
@@ -241,6 +260,16 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
 const AuthenticatedRouteRouteWithChildren =
   AuthenticatedRouteRoute._addFileChildren(AuthenticatedRouteRouteChildren)
 
+interface AuthRouteChildren {
+  AuthCallbackRoute: typeof AuthCallbackRoute
+}
+
+const AuthRouteChildren: AuthRouteChildren = {
+  AuthCallbackRoute: AuthCallbackRoute,
+}
+
+const AuthRouteWithChildren = AuthRoute._addFileChildren(AuthRouteChildren)
+
 interface ReportsLocalRouteChildren {
   ReportsLocalIdRoute: typeof ReportsLocalIdRoute
 }
@@ -256,7 +285,7 @@ const ReportsLocalRouteWithChildren = ReportsLocalRoute._addFileChildren(
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AuthenticatedRouteRoute: AuthenticatedRouteRouteWithChildren,
-  AuthRoute: AuthRoute,
+  AuthRoute: AuthRouteWithChildren,
   ReportsLocalRoute: ReportsLocalRouteWithChildren,
   ScanLocalRoute: ScanLocalRoute,
   SitemapDotxmlRoute: SitemapDotxmlRoute,
