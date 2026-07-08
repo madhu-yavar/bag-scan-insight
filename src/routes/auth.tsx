@@ -48,25 +48,14 @@ function AuthPage() {
     setLoading(true);
 
     try {
-      const { error } = await supabase.auth.signInWithOAuth({
-        provider: 'magiclink',
+      const { error } = await supabase.auth.signInWithOtp({
+        email,
         options: {
           emailRedirectTo: `${window.location.origin}/auth/callback`,
-          email: email,
         }
       });
 
-      if (error) {
-        // Try with OTP instead
-        const { error: otpError } = await supabase.auth.signInWithOtp({
-          email,
-          options: {
-            emailRedirectTo: `${window.location.origin}/auth/callback`,
-          }
-        });
-
-        if (otpError) throw otpError;
-      }
+      if (error) throw error;
 
       setMagicLinkSent(true);
       toast.success("Magic link sent! Check your email.");
