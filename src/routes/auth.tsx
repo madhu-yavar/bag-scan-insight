@@ -48,10 +48,15 @@ function AuthPage() {
     setLoading(true);
 
     try {
+      // Use the current domain for redirect, or fallback to production URL
+      const redirectUrl = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+        ? `${window.location.origin}/auth/callback`
+        : 'https://godigit.yavar.ai/auth/callback';
+
       const { error } = await supabase.auth.signInWithOtp({
         email,
         options: {
-          emailRedirectTo: `${window.location.origin}/auth/callback`,
+          emailRedirectTo: redirectUrl,
         }
       });
 
