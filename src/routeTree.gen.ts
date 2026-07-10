@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as SitemapDotxmlRouteImport } from './routes/sitemap[.]xml'
 import { Route as ScanLocalRouteImport } from './routes/scan-local'
+import { Route as ResetPasswordRouteImport } from './routes/reset-password'
 import { Route as ReportsLocalRouteImport } from './routes/reports-local'
 import { Route as AuthRouteImport } from './routes/auth'
 import { Route as AuthenticatedRouteRouteImport } from './routes/_authenticated/route'
@@ -29,6 +30,11 @@ const SitemapDotxmlRoute = SitemapDotxmlRouteImport.update({
 const ScanLocalRoute = ScanLocalRouteImport.update({
   id: '/scan-local',
   path: '/scan-local',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ResetPasswordRoute = ResetPasswordRouteImport.update({
+  id: '/reset-password',
+  path: '/reset-password',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ReportsLocalRoute = ReportsLocalRouteImport.update({
@@ -80,6 +86,7 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/auth': typeof AuthRouteWithChildren
   '/reports-local': typeof ReportsLocalRouteWithChildren
+  '/reset-password': typeof ResetPasswordRoute
   '/scan-local': typeof ScanLocalRoute
   '/sitemap.xml': typeof SitemapDotxmlRoute
   '/history': typeof AuthenticatedHistoryRoute
@@ -92,6 +99,7 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/auth': typeof AuthRouteWithChildren
   '/reports-local': typeof ReportsLocalRouteWithChildren
+  '/reset-password': typeof ResetPasswordRoute
   '/scan-local': typeof ScanLocalRoute
   '/sitemap.xml': typeof SitemapDotxmlRoute
   '/history': typeof AuthenticatedHistoryRoute
@@ -106,6 +114,7 @@ export interface FileRoutesById {
   '/_authenticated': typeof AuthenticatedRouteRouteWithChildren
   '/auth': typeof AuthRouteWithChildren
   '/reports-local': typeof ReportsLocalRouteWithChildren
+  '/reset-password': typeof ResetPasswordRoute
   '/scan-local': typeof ScanLocalRoute
   '/sitemap.xml': typeof SitemapDotxmlRoute
   '/_authenticated/history': typeof AuthenticatedHistoryRoute
@@ -120,6 +129,7 @@ export interface FileRouteTypes {
     | '/'
     | '/auth'
     | '/reports-local'
+    | '/reset-password'
     | '/scan-local'
     | '/sitemap.xml'
     | '/history'
@@ -132,6 +142,7 @@ export interface FileRouteTypes {
     | '/'
     | '/auth'
     | '/reports-local'
+    | '/reset-password'
     | '/scan-local'
     | '/sitemap.xml'
     | '/history'
@@ -145,6 +156,7 @@ export interface FileRouteTypes {
     | '/_authenticated'
     | '/auth'
     | '/reports-local'
+    | '/reset-password'
     | '/scan-local'
     | '/sitemap.xml'
     | '/_authenticated/history'
@@ -159,6 +171,7 @@ export interface RootRouteChildren {
   AuthenticatedRouteRoute: typeof AuthenticatedRouteRouteWithChildren
   AuthRoute: typeof AuthRouteWithChildren
   ReportsLocalRoute: typeof ReportsLocalRouteWithChildren
+  ResetPasswordRoute: typeof ResetPasswordRoute
   ScanLocalRoute: typeof ScanLocalRoute
   SitemapDotxmlRoute: typeof SitemapDotxmlRoute
 }
@@ -177,6 +190,13 @@ declare module '@tanstack/react-router' {
       path: '/scan-local'
       fullPath: '/scan-local'
       preLoaderRoute: typeof ScanLocalRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/reset-password': {
+      id: '/reset-password'
+      path: '/reset-password'
+      fullPath: '/reset-password'
+      preLoaderRoute: typeof ResetPasswordRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/reports-local': {
@@ -287,6 +307,7 @@ const rootRouteChildren: RootRouteChildren = {
   AuthenticatedRouteRoute: AuthenticatedRouteRouteWithChildren,
   AuthRoute: AuthRouteWithChildren,
   ReportsLocalRoute: ReportsLocalRouteWithChildren,
+  ResetPasswordRoute: ResetPasswordRoute,
   ScanLocalRoute: ScanLocalRoute,
   SitemapDotxmlRoute: SitemapDotxmlRoute,
 }

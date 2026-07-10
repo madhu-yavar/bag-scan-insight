@@ -17,6 +17,7 @@ const DB_PATH = resolve(DATA_DIR, "bagscan.sqlite");
 
 type ScanRow = {
   id: string;
+  user_id: string;
   reference: string | null;
   notes: string | null;
   model: string;
@@ -42,7 +43,7 @@ type ImageRow = {
 
 let db: DatabaseSync | null = null;
 
-export function saveScan(data: SaveLocalScanData): LocalScanSummary {
+export function saveScan(userId: string, data: SaveLocalScanData): LocalScanSummary {
   const id = randomUUID();
   const now = new Date().toISOString();
   const scanDir = resolve(IMAGE_DIR, id);
@@ -74,13 +75,14 @@ export function saveScan(data: SaveLocalScanData): LocalScanSummary {
     database
       .prepare(
         `INSERT INTO scans (
-          id, reference, notes, model, status, created_at, updated_at,
+          id, user_id, reference, notes, model, status, created_at, updated_at,
           manual_dimensions_json, approved_review_views, analysis_json, capture_validation_status,
           summary, bag_type, overall_condition
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         id,
+        userId,
         normalizeText(data.reference),
         normalizeText(data.notes),
         data.model,
@@ -109,10 +111,10 @@ export function saveScan(data: SaveLocalScanData): LocalScanSummary {
     throw error;
   }
 
-  return scanRowToSummary(readScanRow(id));
+  return scanRowToSummary(readScanRow(userId, id));
 }
 
-export function listScans(limit: number): LocalScanSummary[] {
+export function listScans(userId: string, limit: number): LocalScanSummary[] {
   const rows = getDb()
     .prepare(
       `SELECT
@@ -120,17 +122,18 @@ export function listScans(limit: number): LocalScanSummary[] {
         COUNT(i.view) AS image_count
        FROM scans s
        LEFT JOIN scan_images i ON i.scan_id = s.id
+       WHERE s.user_id = ?
        GROUP BY s.id
        ORDER BY s.created_at DESC
        LIMIT ?`,
     )
-    .all(limit) as ScanRow[];
+    .all(userId, limit) as ScanRow[];
 
   return rows.map(scanRowToSummary);
 }
 
-export function getScan(id: string): LocalScanDetail {
-  const row = readScanRow(id);
+export function getScan(userId: string, id: string): LocalScanDetail {
+  const row = readScanRow(userId, id);
   const summary = scanRowToSummary(row);
   const images = getDb()
     .prepare(
@@ -160,14 +163,16 @@ export function getScan(id: string): LocalScanDetail {
   };
 }
 
-export function updateApprovals(id: string, approvedReviewViews: string[]) {
-  readScanRow(id);
+export function updateApprovals(userId: string, id: string, approvedReviewViews: string[]) {
+  readScanRow(userId, id);
   getDb()
-    .prepare(`UPDATE scans SET approved_review_views = ?, updated_at = ? WHERE id = ?`)
-    .run(JSON.stringify(approvedReviewViews), new Date().toISOString(), id);
+    .prepare(
+      `UPDATE scans SET approved_review_views = ?, updated_at = ? WHERE id = ? AND user_id = ?`,
+    )
+    .run(JSON.stringify(approvedReviewViews), new Date().toISOString(), id, userId);
 }
 
-function readScanRow(id: string): ScanRow {
+function readScanRow(userId: string, id: string): ScanRow {
   const row = getDb()
     .prepare(
       `SELECT
@@ -175,10 +180,10 @@ function readScanRow(id: string): ScanRow {
         COUNT(i.view) AS image_count
        FROM scans s
        LEFT JOIN scan_images i ON i.scan_id = s.id
-       WHERE s.id = ?
+       WHERE s.id = ? AND s.user_id = ?
        GROUP BY s.id`,
     )
-    .get(id) as ScanRow | undefined;
+    .get(id, userId) as ScanRow | undefined;
 
   if (!row) throw new Error("Saved scan not found.");
   return row;
@@ -214,6 +219,7 @@ function getDb() {
     PRAGMA foreign_keys = ON;
     CREATE TABLE IF NOT EXISTS scans (
       id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
       reference TEXT,
       notes TEXT,
       model TEXT NOT NULL,
@@ -242,7 +248,11 @@ function getDb() {
     CREATE INDEX IF NOT EXISTS idx_scans_created_at ON scans(created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_scan_images_scan_id ON scan_images(scan_id);
   `);
+  ensureColumn(db, "scans", "user_id", "TEXT");
   ensureColumn(db, "scans", "manual_dimensions_json", "TEXT");
+  db.exec(
+    "CREATE INDEX IF NOT EXISTS idx_scans_user_created_at ON scans(user_id, created_at DESC)",
+  );
 
   return db;
 }

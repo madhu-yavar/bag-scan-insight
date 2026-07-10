@@ -2,6 +2,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { z } from "zod";
+import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 
 const ANALYSIS_PROMPT = `You are an expert baggage inspector. You will receive up to four submitted photo slots for one baggage item. The submitted slot labels are intended to be front, back, top, and side, but the operator may upload the wrong angle, duplicate an angle, crop the bag, stand too far away, stand too close, submit a blurry/poorly lit image, or mix photos from two different bags.
 
@@ -98,6 +99,7 @@ const AnalyzeInput = z.object({
 type Json = string | number | boolean | null | { [k: string]: Json } | Json[];
 
 export const analyzeBaggageWithGemini = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
   .validator((input: unknown) => AnalyzeInput.parse(input))
   .handler(async ({ data }) => {
     const key = getGeminiApiKey();

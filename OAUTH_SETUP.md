@@ -1,117 +1,93 @@
-# OAuth Sign-In Setup Guide
+# Password Sign-In Setup Guide
 
-Set up Google and LinkedIn OAuth for BagScan.
+BagScan now uses Supabase email/password sign-in. Magic links are not used by the app login page.
 
-## Overview
+## Create Two Users
 
-The application supports:
-- ✅ Google OAuth (configured via Lovable)
-- ✅ LinkedIn OAuth (needs manual setup)
+Create two real users in Supabase Auth so the app receives normal Supabase sessions and JWTs.
 
-## Step 1: Set up Google OAuth
+### Option A: Create With Script
 
-### 1.1 Get Google OAuth Credentials
+Use this if you have the Supabase service-role key. Do not commit this key.
 
-1. Go to [Google Cloud Console](https://console.cloud.google.com/)
-2. Create a new project or select existing one
-3. Enable Google+ API:
-   - Go to "APIs & Services" → "Library"
-   - Search for "Google+ API" and enable it
+Add these values to `.env.local` or export them in your shell:
 
-4. Configure OAuth consent screen:
-   - Go to "APIs & Services" → "OAuth consent screen"
-   - Choose "External" (for production) or "Internal" (for testing)
-   - Add required fields:
-     - App name: `BagScan`
-     - User support email: `your-email@example.com`
-     - Developer contact: `your-email@example.com`
-   - Add scopes:
-     - `openid`
-     - `email`
-     - `profile`
+```bash
+SUPABASE_SERVICE_ROLE_KEY=your_service_role_key
+OPERATOR_1_EMAIL=ms.madhugraj@gmail.com
+OPERATOR_1_PASSWORD=choose-a-strong-password
+OPERATOR_2_EMAIL=operator2@example.com
+OPERATOR_2_PASSWORD=choose-a-different-strong-password
+```
 
-5. Create OAuth 2.0 credentials:
-   - Go to "APIs & Services" → "Credentials"
-   - Click "Create Credentials" → "OAuth client ID"
-   - Application type: `Web application`
-   - Name: `BagScan Web`
-   - Authorized redirect URIs:
-     - `https://godigit.yavar.ai/auth/callback`
-     - `http://35.244.7.120:8011/auth/callback`
-     - `http://localhost:3000/auth/callback` (for local development)
-   - Save and copy:
-     - **Client ID**
-     - **Client Secret**
+Then run:
 
-### 1.2 Configure in Supabase
+```bash
+npm run users:create
+```
 
-1. Go to [Supabase Dashboard](https://supabase.com/dashboard/project/spzuiycdiiymapqbrnkl)
-2. Navigate to: **Authentication** → **Providers** → **Google**
-3. Enable Google provider
-4. Add your credentials:
-   - **Client ID**: Your Google OAuth client ID
-   - **Client Secret**: Your Google OAuth secret
-5. Save the configuration
+The script creates missing users and updates existing users' passwords. It also marks emails
+confirmed.
 
-## Step 2: Set up LinkedIn OAuth
+### Option B: Create From Dashboard
 
-### 2.1 Create LinkedIn App
+1. Open Supabase Dashboard for the BagScan project.
+2. Go to **Authentication** -> **Users**.
+3. Click **Add user** -> **Create new user**.
+4. Create the first user:
+   - Email: `operator1@godigit.local` or your preferred operator email.
+   - Password: set a strong password and store it in your password manager.
+   - Auto Confirm User: enabled.
+5. Create the second user:
+   - Email: `operator2@godigit.local` or your preferred operator email.
+   - Password: set a different strong password.
+   - Auto Confirm User: enabled.
 
-1. Go to [LinkedIn Developer Portal](https://www.linkedin.com/developers/)
-2. Sign in and go to "Create App"
-3. Fill in app details:
-   - **App name**: `BagScan`
-   - **Description**: `AI-powered baggage scanning application`
-   - **LinkedIn Page**: Select your company page (optional)
-   - **App logo**: Upload a logo (optional)
-   - **Email**: `your-email@example.com`
+The email must be confirmed, otherwise `signInWithPassword` can fail depending on the Supabase
+project's email-confirmation settings.
 
-4. Configure OAuth 2.0 redirect URLs:
-   - Add: `https://godigit.yavar.ai/auth/callback`
-   - Add: `http://35.244.7.120:8011/auth/callback`
-   - Add: `http://localhost:3000/auth/callback` (for local development)
+## Required Auth Settings
 
-5. Select products:
-   - Add **Sign In with LinkedIn** (this enables OAuth)
+1. Go to **Authentication** -> **Providers** -> **Email**.
+2. Keep **Email provider** enabled.
+3. Make sure password sign-in is enabled.
+4. If you manually create users from the dashboard, either enable **Auto Confirm User** during
+   creation or confirm them afterward from the user detail page.
 
-6. Configure permissions:
-   - `r_liteprofile` (Basic profile)
-   - `r_emailaddress` (Email address)
+## App URLs
 
-7. Save and copy:
-   - **Client ID**
-   - **Client Secret**
+These are still useful for redirects after sign-out or if old callback links exist, but password
+login does not depend on email redirect delivery.
 
-### 2.2 Configure in Supabase
-
-1. Go to [Supabase Dashboard](https://supabase.com/dashboard/project/spzuiycdiiymapqbrnkl)
-2. Navigate to: **Authentication** → **Providers** → **LinkedIn**
-3. Enable LinkedIn provider
-4. Add your credentials:
-   - **Client ID**: Your LinkedIn OAuth client ID
-   - **Client Secret**: Your LinkedIn OAuth secret
-5. **Authorized Redirect URLs**:
+1. Go to **Authentication** -> **URL Configuration**.
+2. Set **Site URL** to `https://godigit.yavar.ai`.
+3. Add these **Redirect URLs**:
    - `https://godigit.yavar.ai/auth/callback`
+   - `https://godigit.yavar.ai/reset-password`
    - `http://35.244.7.120:8011/auth/callback`
-6. Save the configuration
+   - `http://35.244.7.120:8011/reset-password`
+   - `http://localhost:5174/auth/callback` (local development only)
+   - `http://localhost:5174/reset-password` (local password recovery testing)
 
-## Step 3: Test Locally
+If password reset emails still open `http://localhost:3000`, the Supabase **Site URL** is still set
+to `localhost:3000` or the recovery email template has a hard-coded localhost URL. Use the default
+recovery link template variable instead of a hard-coded URL.
+
+## Test Locally
 
 ```bash
 cd /Users/yavar/Documents/CoE/godigitag/bag-scan-insight
-npm run dev
+npm run dev -- --host 0.0.0.0 --port 5174
 ```
 
-Visit: `http://localhost:3000/auth`
+Visit `http://localhost:5174/auth` and sign in with one of the two users.
 
-## Step 4: Deploy to VM
-
-After testing locally:
+## Deploy
 
 ```bash
 cd /Users/yavar/Documents/CoE/godigitag/bag-scan-insight
 git add .
-git commit -m "feat: Add LinkedIn OAuth sign-in"
+git commit -m "fix: switch auth to password login"
 git push
 
 # On VM
@@ -121,41 +97,36 @@ docker compose build
 docker compose up -d
 ```
 
-## OAuth URLs
-
-| Provider | Callback URL |
-|----------|--------------|
-| Google | `https://godigit.yavar.ai/auth/callback` |
-| LinkedIn | `https://godigit.yavar.ai/auth/callback` |
-
 ## Troubleshooting
 
-### Error: "Redirect URI mismatch"
-- Ensure all redirect URIs are added in both:
-  - OAuth provider settings (Google/LinkedIn)
-  - Supabase authentication settings
+### Error: "Invalid login credentials"
 
-### Error: "Invalid client credentials"
-- Verify Client ID and Client Secret are correct
-- Check for extra spaces in credentials
+- Confirm the user exists in **Authentication** -> **Users**.
+- Confirm the email is marked confirmed.
+- Reset the user's password from the Supabase Dashboard and retry.
 
-### Error: "Provider not enabled"
-- Enable the provider in Supabase Dashboard
-- Check provider is listed in Authentication → Providers
+### Password Reset Link Opens localhost:3000
 
-## Environment Variables (Optional)
+- Go to **Authentication** -> **URL Configuration**.
+- Set **Site URL** to `http://localhost:5174` for local recovery testing, or
+  `https://godigit.yavar.ai` for production.
+- Add `http://localhost:5174/reset-password` to **Redirect URLs**.
+- Generate a new reset email after saving the URL settings. Old emails keep the old URL.
 
-If you want to override provider settings:
+### Error: "Email not confirmed"
 
-```bash
-# .env.local
-NEXT_PUBLIC_SUPABASE_URL=your_supabase_url
-NEXT_PUBLIC_SUPABASE_ANON_KEY=your_anon_key
-```
+- Open the user in Supabase Dashboard and confirm the email.
+- For manually created operator accounts, use **Auto Confirm User**.
+
+### User Can Sign In But Cannot Scan
+
+- Check that `SUPABASE_URL` and `SUPABASE_PUBLISHABLE_KEY` are set on the server.
+- Check that `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY` are set for the client build.
+- The server functions require a valid Supabase JWT; clearing browser storage and signing in again
+  usually fixes stale sessions.
 
 ## Security Notes
 
-- Never commit OAuth secrets to git
-- Use different redirect URIs for production and development
-- Regularly rotate OAuth secrets
-- Monitor OAuth usage in provider dashboards
+- Do not commit passwords or service-role keys.
+- Use unique passwords for the two users.
+- Rotate the exposed Gemini API key before production use.

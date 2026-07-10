@@ -22,6 +22,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { requireSignedIn } from "@/lib/auth-helpers";
 import { VIEWS, type BaggageView } from "@/lib/baggage-views";
 import { analyzeBaggageWithGemini } from "@/lib/local-gemini.functions";
 import {
@@ -31,6 +32,10 @@ import {
 } from "@/lib/local-scan-store.functions";
 
 export const Route = createFileRoute("/scan-local")({
+  ssr: false,
+  beforeLoad: async ({ location }) => {
+    await requireSignedIn(location);
+  },
   head: () => ({
     meta: [
       { title: "New baggage scan - BagScan" },

@@ -2,9 +2,10 @@
 
 Lovable-generated baggage scan app with an added local Gemini mode.
 
-## Local Mode
+## Local Gemini Mode
 
-Local mode does not require Supabase, Lovable Cloud, or a Lovable API key.
+Local Gemini mode uses the local `GEMINI_API_KEY` for analysis, but scan and report routes still
+require Supabase sign-in.
 
 Create `.env.local`:
 
@@ -26,9 +27,15 @@ Open:
 
 ## Modes
 
-- `/scan-local`: browser captures photos, local server function calls Gemini directly with `GEMINI_API_KEY`, no Supabase.
+- `/scan-local`: browser captures photos, local server function calls Gemini directly with `GEMINI_API_KEY`, requires Supabase auth.
 - `/reports-local`: locally saved scan reports and photo sets.
 - `/scan`: original cloud mode, requires Supabase auth/storage/database and Lovable AI Gateway config.
+
+## Auth
+
+The app uses Supabase email/password sign-in. Create the two operator accounts in Supabase
+Authentication -> Users and mark their emails confirmed. Password recovery links are handled at
+`/reset-password`; Supabase Auth URL Configuration must not point to `localhost:3000`.
 
 ## Local storage
 

@@ -13,6 +13,11 @@ import { Toaster } from "sonner";
 import appCss from "../styles.css?url";
 import { reportLovableError } from "../lib/lovable-error-reporting";
 import { hasSupabaseConfig, supabase } from "@/integrations/supabase/client";
+import {
+  buildCallbackUrlForCurrentAuthParams,
+  hasAuthRedirectParams,
+  readAuthRedirectParams,
+} from "@/lib/auth-helpers";
 
 function NotFoundComponent() {
   return (
@@ -137,6 +142,22 @@ function RootShell({ children }: { children: ReactNode }) {
 function RootComponent() {
   const { queryClient } = Route.useRouteContext();
   const router = useRouter();
+
+  useEffect(() => {
+    if (!hasSupabaseConfig() || typeof window === "undefined") return;
+    if (window.location.pathname === "/auth/callback") return;
+
+    const params = readAuthRedirectParams();
+    if (!hasAuthRedirectParams(params)) return;
+
+    const next =
+      params.get("type") === "recovery"
+        ? "/reset-password"
+        : window.location.pathname === "/"
+          ? "/scan-local"
+          : window.location.pathname;
+    window.location.replace(buildCallbackUrlForCurrentAuthParams(next));
+  }, []);
 
   useEffect(() => {
     if (!hasSupabaseConfig()) return;

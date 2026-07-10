@@ -6,9 +6,14 @@ import { useEffect, useState } from "react";
 import { AppHeader } from "@/components/AppHeader";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { requireSignedIn } from "@/lib/auth-helpers";
 import { listLocalScans, type LocalScanSummary } from "@/lib/local-scan-store.functions";
 
 export const Route = createFileRoute("/reports-local")({
+  ssr: false,
+  beforeLoad: async ({ location }) => {
+    await requireSignedIn(location);
+  },
   head: () => ({
     meta: [
       { title: "Saved reports - BagScan" },

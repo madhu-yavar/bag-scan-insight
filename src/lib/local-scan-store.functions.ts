@@ -1,5 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
+import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 
 export type {
   LocalScanDetail,
@@ -47,30 +48,34 @@ const UpdateApprovalsInput = z.object({
 });
 
 export const saveLocalScan = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
   .validator((input: unknown) => SaveScanInput.parse(input))
-  .handler(async ({ data }) => {
+  .handler(async ({ context, data }) => {
     const { saveScan } = await import("./local-scan-store.server");
-    return { scan: saveScan(data) };
+    return { scan: saveScan(context.userId, data) };
   });
 
 export const listLocalScans = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
   .validator((input: unknown) => ListScansInput.parse(input))
-  .handler(async ({ data }) => {
+  .handler(async ({ context, data }) => {
     const { listScans } = await import("./local-scan-store.server");
-    return { scans: listScans(data.limit) };
+    return { scans: listScans(context.userId, data.limit) };
   });
 
 export const getLocalScan = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
   .validator((input: unknown) => GetScanInput.parse(input))
-  .handler(async ({ data }) => {
+  .handler(async ({ context, data }) => {
     const { getScan } = await import("./local-scan-store.server");
-    return { scan: getScan(data.id) };
+    return { scan: getScan(context.userId, data.id) };
   });
 
 export const updateLocalScanApprovals = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
   .validator((input: unknown) => UpdateApprovalsInput.parse(input))
-  .handler(async ({ data }) => {
+  .handler(async ({ context, data }) => {
     const { getScan, updateApprovals } = await import("./local-scan-store.server");
-    updateApprovals(data.id, data.approved_review_views);
-    return { scan: getScan(data.id) };
+    updateApprovals(context.userId, data.id, data.approved_review_views);
+    return { scan: getScan(context.userId, data.id) };
   });

@@ -1,1 +1,35 @@
 project_id = "spzuiycdiiymapqbrnkl"
+
+[auth]
+enabled = true
+site_url = "https://godigit.yavar.ai"
+additional_redirect_urls = [
+  "https://godigit.yavar.ai/auth/callback",
+  "https://godigit.yavar.ai/reset-password",
+  "http://35.244.7.120:8011/auth/callback",
+  "http://35.244.7.120:8011/reset-password",
+  "http://localhost:5174/auth/callback",
+  "http://localhost:5174/reset-password",
+]
+jwt_expiry = 3600
+enable_refresh_token_rotation = true
+refresh_token_reuse_interval = 10
+enable_signup = false
+enable_anonymous_sign_ins = false
+minimum_password_length = 8
+
+[auth.email]
+enable_signup = false
+double_confirm_changes = true
+enable_confirmations = true
+secure_password_change = false
+max_frequency = "1m0s"
+otp_length = 8
+otp_expiry = 3600
+
+[auth.mfa]
+max_enrolled_factors = 10
+
+[auth.mfa.totp]
+enroll_enabled = true
+verify_enabled = true
