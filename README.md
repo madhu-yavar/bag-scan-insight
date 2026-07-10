@@ -47,3 +47,15 @@ Completed local scans are saved on this machine:
 The `data/` folder is ignored by git.
 
 Dimensions are returned as Gemini visual estimates from the four same-baggage views, with confidence and basis recorded in the report. If the views are mixed, duplicated, or unusable, the app asks for the specific photo to be retaken.
+
+## Production deployment
+
+Production runs from Docker. Secrets must live in the VM `.env` file and must not be committed or
+baked into the image.
+
+```bash
+docker compose up -d --build
+```
+
+If a Gemini key is exposed, rotate it in Google Cloud/AI Studio, update `GEMINI_API_KEY` in the VM
+`.env`, and rebuild/restart the container.

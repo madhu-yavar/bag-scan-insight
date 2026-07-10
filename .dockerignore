@@ -1,0 +1,11 @@
+.git
+.env
+.env.*
+.output
+.vinxi
+.tanstack
+.nitro
+data
+node_modules
+npm-debug.log*
+yarn-error.log*
