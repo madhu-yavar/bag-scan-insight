@@ -136,6 +136,7 @@ const ValidateViewInput = z.object({
 });
 
 type Json = string | number | boolean | null | { [k: string]: Json } | Json[];
+type ViewSlot = z.infer<typeof ValidateViewInput>["view"];
 
 export const analyzeBaggageWithGemini = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
@@ -257,9 +258,28 @@ export const validateBaggageViewWithGemini = createServerFn({ method: "POST" })
       .join("\n")
       .trim();
 
-    if (!raw) throw new Error("Gemini returned an empty response.");
+    if (!raw) {
+      return {
+        validation: rejectedViewValidation(
+          data.view,
+          "Gemini returned an empty validation response. Retake this photo.",
+        ),
+        model: data.model,
+      };
+    }
 
-    return { validation: parseJsonResponse(raw), model: data.model };
+    try {
+      return { validation: parseJsonResponse(raw), model: data.model };
+    } catch (error) {
+      console.warn("Gemini returned non-JSON output during single-view validation.", error);
+      return {
+        validation: rejectedViewValidation(
+          data.view,
+          "Gemini could not validate this photo. Retake it with the requested view clearly visible.",
+        ),
+        model: data.model,
+      };
+    }
   });
 
 function parseDataUrl(dataUrl: string) {
@@ -298,17 +318,99 @@ function normalizeEnvValue(value: string | undefined) {
   return quoted ? quoted[2] : trimmed;
 }
 
+function rejectedViewValidation(view: ViewSlot, reason: string) {
+  return {
+    submitted_slot: view,
+    detected_view: "unknown",
+    status: "rejected",
+    view_match: false,
+    bag_visible: "not_visible",
+    framing: "unknown",
+    lighting: "unknown",
+    sharpness: "unknown",
+    bag_count: 0,
+    multiple_bags_visible: false,
+    retake_required: true,
+    retake_reason: reason,
+  };
+}
+
 function parseJsonResponse(raw: string): Json {
-  const cleaned = raw
+  const cleaned = stripCodeFence(raw);
+  const candidates = [cleaned, extractJsonBlock(cleaned)]
+    .map((candidate) => candidate.trim())
+    .filter(Boolean);
+
+  for (const candidate of candidates) {
+    for (const value of [candidate, removeTrailingJsonCommas(candidate)]) {
+      try {
+        return parseJsonValue(value);
+      } catch {
+        // Try the next recoverable shape before surfacing a model-format error.
+      }
+    }
+  }
+
+  throw new Error("Gemini returned non-JSON output.");
+}
+
+function parseJsonValue(value: string): Json {
+  const parsed = JSON.parse(value) as Json;
+  if (typeof parsed === "string") {
+    const nested = parsed.trim();
+    if (nested.startsWith("{") || nested.startsWith("[")) return JSON.parse(nested) as Json;
+  }
+  return parsed;
+}
+
+function stripCodeFence(value: string) {
+  return value
     .trim()
     .replace(/^```(?:json)?\s*/i, "")
-    .replace(/```$/, "")
+    .replace(/\s*```$/i, "")
     .trim();
-  try {
-    return JSON.parse(cleaned) as Json;
-  } catch {
-    const match = cleaned.match(/\{[\s\S]*\}/);
-    if (match) return JSON.parse(match[0]) as Json;
-    throw new Error("Gemini returned non-JSON output.");
+}
+
+function removeTrailingJsonCommas(value: string) {
+  return value.replace(/,\s*([}\]])/g, "$1");
+}
+
+function extractJsonBlock(value: string) {
+  const objectIndex = value.indexOf("{");
+  const arrayIndex = value.indexOf("[");
+  const starts = [objectIndex, arrayIndex].filter((index) => index >= 0);
+  if (starts.length === 0) return "";
+
+  const start = Math.min(...starts);
+  const open = value[start];
+  const close = open === "{" ? "}" : "]";
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+
+  for (let index = start; index < value.length; index += 1) {
+    const char = value[index];
+
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+
+    if (char === "\\") {
+      escaped = inString;
+      continue;
+    }
+
+    if (char === '"') {
+      inString = !inString;
+      continue;
+    }
+
+    if (inString) continue;
+    if (char === open) depth += 1;
+    if (char === close) depth -= 1;
+    if (depth === 0) return value.slice(start, index + 1);
   }
+
+  return "";
 }
