@@ -525,7 +525,8 @@ function tryParseJsonResponse(raw: string) {
 
 function parseJsonResponse(raw: string): Json {
   const cleaned = stripCodeFence(raw);
-  const candidates = [cleaned, extractJsonBlock(cleaned)]
+  const jsonStart = extractJsonStart(cleaned);
+  const candidates = [cleaned, extractJsonBlock(cleaned), closeOpenJsonContainers(jsonStart)]
     .map((candidate) => candidate.trim())
     .filter(Boolean);
 
@@ -561,6 +562,48 @@ function stripCodeFence(value: string) {
 
 function removeTrailingJsonCommas(value: string) {
   return value.replace(/,\s*([}\]])/g, "$1");
+}
+
+function extractJsonStart(value: string) {
+  const objectIndex = value.indexOf("{");
+  const arrayIndex = value.indexOf("[");
+  const starts = [objectIndex, arrayIndex].filter((index) => index >= 0);
+  if (starts.length === 0) return "";
+  return value.slice(Math.min(...starts));
+}
+
+function closeOpenJsonContainers(value: string) {
+  const stack: string[] = [];
+  let inString = false;
+  let escaped = false;
+
+  for (const char of value) {
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+
+    if (char === "\\") {
+      escaped = inString;
+      continue;
+    }
+
+    if (char === '"') {
+      inString = !inString;
+      continue;
+    }
+
+    if (inString) continue;
+    if (char === "{") stack.push("}");
+    else if (char === "[") stack.push("]");
+    else if (char === "}" || char === "]") {
+      if (stack.at(-1) === char) stack.pop();
+      else return value;
+    }
+  }
+
+  if (inString || stack.length === 0) return value;
+  return `${value}${stack.reverse().join("")}`;
 }
 
 function extractJsonBlock(value: string) {
