@@ -139,16 +139,15 @@ You will receive 2 to 4 submitted slots. One slot is the newly uploaded photo. C
 
 This is an adversarial validation task. Operators may accidentally or deliberately mix photos from two similar suitcases. Do not assume matching slot labels mean the same suitcase.
 
-Compare durable identity signals across photos:
-- primary and secondary colors
-- hard-shell vs fabric material
-- shell texture, ribbing, panels, seams, and corner shape
-- wheel count, wheel style, and wheel placement
-- telescopic handle shape and position
-- side/top handles and straps
-- zipper tracks, pockets, locks, expansion seams
-- logos, tags, stickers, labels, scuffs, dents, stains, tape, or unique marks
-- overall proportions and edge/corner design
+Compare durable identity signals across photos and score each signal independently. Use these exact feature names and weights:
+- unique_marks, weight 30: logos, tags, stickers, labels, tape, dents, scuffs, stains, cracks, or other distinctive marks
+- color, weight 20: primary and secondary color family
+- material, weight 15: hard-shell, fabric, leather, nylon, cardboard, etc.
+- texture_pattern, weight 15: ribbing, grooves, shell panels, weave, seams, surface pattern
+- wheels, weight 15: wheel count, wheel style, wheel placement
+- handles, weight 15: telescopic, top, side handles, straps, handle shape and placement
+- zipper_pockets_locks, weight 15: zipper tracks, external pockets, locks, expansion seams
+- shape_proportion, weight 10: overall proportions, edge/corner design, thickness/depth compatibility
 
 Rules:
 - Set same_baggage false when any submitted slot is visually incompatible with the reference suitcase.
@@ -157,15 +156,33 @@ Rules:
 - Opposite sides may have different pockets or labels, but core construction, material, color family, wheel/handle style, and distinctive marks must be compatible.
 - When in doubt, prefer needs-retake over accepting a mixed-bag set.
 - recommended_retake_slots should include the minimum slots the operator should retake. Prefer the newly uploaded slot when it conflicts with already accepted slots.
+- For each feature score, set observable false when the feature is not clearly visible in enough views to compare.
+- For observable features, use match "match", "mismatch", or "unknown". Use "mismatch" only when there is concrete visual contradiction.
+- Hard mismatches must include color/material/texture/wheel/handle/unique mark contradictions that should block capture immediately.
+- confidence_score must be a number from 0 to 1 based on the visible weighted evidence, not a guess. Penalize unknowns and weak overlap.
 
 Return STRICT JSON only:
 {
   "same_baggage": true,
   "confidence": "high|medium|low",
+  "confidence_score": 0.92,
   "new_view": "front|back|top|side",
   "reference_slots": ["front"],
   "conflicting_slots": [],
   "recommended_retake_slots": [],
+  "hard_mismatches": [
+    { "feature": "color", "slots": ["front","side"], "reason": "front is black, side is blue" }
+  ],
+  "feature_scores": [
+    { "feature": "unique_marks", "weight": 30, "observable": false, "match": "unknown", "evidence": "no shared unique mark visible" },
+    { "feature": "color", "weight": 20, "observable": true, "match": "match", "evidence": "all visible panels are black" },
+    { "feature": "material", "weight": 15, "observable": true, "match": "match", "evidence": "all views show hard shell material" },
+    { "feature": "texture_pattern", "weight": 15, "observable": true, "match": "mismatch", "evidence": "front has vertical ribbing, side is smooth fabric" },
+    { "feature": "wheels", "weight": 15, "observable": true, "match": "unknown", "evidence": "wheels not visible clearly in side view" },
+    { "feature": "handles", "weight": 15, "observable": true, "match": "match", "evidence": "same telescopic handle style" },
+    { "feature": "zipper_pockets_locks", "weight": 15, "observable": true, "match": "unknown", "evidence": "zipper path partly occluded" },
+    { "feature": "shape_proportion", "weight": 10, "observable": true, "match": "match", "evidence": "similar rectangular hard-shell proportions" }
+  ],
   "evidence": ["short concrete visual evidence"],
   "operator_message": "short operator-facing result"
 }`;
@@ -178,15 +195,20 @@ JSON:
 {
   "same_baggage": true,
   "confidence": "high|medium|low",
+  "confidence_score": 0.92,
   "new_view": "front|back|top|side",
   "reference_slots": ["front"],
   "conflicting_slots": [],
   "recommended_retake_slots": [],
+  "hard_mismatches": [],
+  "feature_scores": [
+    { "feature": "color", "weight": 20, "observable": true, "match": "match|mismatch|unknown", "evidence": "short evidence" }
+  ],
   "evidence": ["visible matching or conflicting identity signals"],
   "operator_message": "short result"
 }
 
-Use same_baggage false if any photo appears to be a different suitcase. Use confidence low when identity cannot be verified.`;
+Use same_baggage false if any photo appears to be a different suitcase. Use confidence low when identity cannot be verified. Include hard_mismatches for blocking contradictions.`;
 
 const AnalyzeInput = z.object({
   accepted_review_views: z.array(z.enum(["front", "back", "top", "side"])).default([]),

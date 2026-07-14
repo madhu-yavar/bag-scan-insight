@@ -55,6 +55,9 @@ export const Route = createFileRoute("/scan-local")({
 type ImageMap = Partial<Record<BaggageView, string>>;
 type JsonObject = Record<string, unknown>;
 const MODEL = "gemini-3.5-flash";
+const IDENTITY_MIN_OBSERVABLE_WEIGHT = 45;
+const IDENTITY_ACCEPT_SCORE = 0.82;
+const IDENTITY_STRONG_SCORE = 0.92;
 
 function LocalScanPage() {
   const analyzeWithGemini = useServerFn(analyzeBaggageWithGemini);
@@ -149,18 +152,19 @@ function LocalScanPage() {
     });
     const identity = toObject(result.identity);
 
-    if (!isIdentityAccepted(identity)) {
+    const decision = identityDecision(identity, view);
+    if (!decision.accepted) {
       return {
         accepted: false,
         warning: "",
-        reason: identityRetakeReason(identity, view),
-        issueSlots: identityIssueSlots(identity, view),
+        reason: decision.reason,
+        issueSlots: decision.issueSlots,
       };
     }
 
     return {
       accepted: true,
-      warning: identityValidationWarning(identity),
+      warning: decision.warning,
       reason: "",
       issueSlots: [] as BaggageView[],
     };
@@ -815,39 +819,82 @@ function singleViewValidationWarning(validation: JsonObject | null) {
   return typeof warning === "string" && warning.trim() ? warning.trim() : "";
 }
 
-function isIdentityAccepted(identity: JsonObject | null) {
-  if (!identity) return false;
-  if (identity.same_baggage !== true) return false;
-
-  const confidence = String(identity.confidence ?? "").toLowerCase();
-  return confidence === "high" || confidence === "medium";
-}
-
-function identityRetakeReason(identity: JsonObject | null, newView: BaggageView) {
+function identityDecision(identity: JsonObject | null, newView: BaggageView) {
+  const issueSlots = identityIssueSlots(identity, newView);
   if (!identity) {
-    return "Could not verify that this photo belongs to the same suitcase. Retake it.";
+    return {
+      accepted: false,
+      warning: "",
+      issueSlots,
+      reason: "Could not verify that this photo belongs to the same suitcase. Retake it.",
+    };
   }
 
-  const message =
-    typeof identity.operator_message === "string" && identity.operator_message.trim()
-      ? identity.operator_message.trim()
-      : "";
-  if (message) return message;
-
-  const evidence = Array.isArray(identity.evidence)
-    ? identity.evidence.map(String).filter(Boolean)
-    : [];
-  if (evidence.length > 0) return evidence.join(" ");
-
+  const score = scoreIdentityEvidence(identity);
+  const evidence = identityEvidence(identity);
+  const hardMismatchReasons = hardIdentityMismatchReasons(identity, score);
   const confidence = String(identity.confidence ?? "").toLowerCase();
+  const scoreText = formatPercent(score.score);
+
   if (identity.same_baggage !== true) {
-    return `${titleCase(newView)} appears to show a different suitcase. Retake this photo.`;
-  }
-  if (confidence === "low") {
-    return "Same-suitcase confidence is too low. Retake this photo with clearer shared identity details.";
+    return {
+      accepted: false,
+      warning: "",
+      issueSlots,
+      reason:
+        operatorIdentityMessage(identity) ||
+        evidence.join(" ") ||
+        `${titleCase(newView)} appears to show a different suitcase. Retake this photo.`,
+    };
   }
 
-  return "Retake this photo so it clearly matches the previously captured suitcase.";
+  if (hardMismatchReasons.length > 0) {
+    return {
+      accepted: false,
+      warning: "",
+      issueSlots,
+      reason: `Identity mismatch detected (${scoreText} score): ${hardMismatchReasons.join(" ")}`,
+    };
+  }
+
+  if (confidence === "low") {
+    return {
+      accepted: false,
+      warning: "",
+      issueSlots,
+      reason: `Same-suitcase confidence is low (${scoreText} score). Retake this photo with clearer shared identity details.`,
+    };
+  }
+
+  if (score.observableWeight < IDENTITY_MIN_OBSERVABLE_WEIGHT) {
+    return {
+      accepted: false,
+      warning: "",
+      issueSlots,
+      reason: `Not enough shared identity evidence is visible. Observable score weight is ${score.observableWeight}; need at least ${IDENTITY_MIN_OBSERVABLE_WEIGHT}. Retake this photo with color/material/wheels/handles or a unique tag visible.`,
+    };
+  }
+
+  if (score.score < IDENTITY_ACCEPT_SCORE) {
+    return {
+      accepted: false,
+      warning: "",
+      issueSlots,
+      reason: `Same-suitcase score is too low (${scoreText}). Retake this photo so it clearly matches the previously captured suitcase.`,
+    };
+  }
+
+  const warning =
+    score.score < IDENTITY_STRONG_SCORE
+      ? `Same-suitcase check passed with review score ${scoreText}. ${evidence.join(" ")}`
+      : "";
+
+  return {
+    accepted: true,
+    warning: warning.trim(),
+    issueSlots: [] as BaggageView[],
+    reason: "",
+  };
 }
 
 function identityIssueSlots(identity: JsonObject | null, newView: BaggageView) {
@@ -861,20 +908,116 @@ function identityIssueSlots(identity: JsonObject | null, newView: BaggageView) {
   return slots.length > 0 ? slots : [newView];
 }
 
-function identityValidationWarning(identity: JsonObject | null) {
-  if (!identity) return "";
+function scoreIdentityEvidence(identity: JsonObject) {
+  const features = Array.isArray(identity.feature_scores)
+    ? identity.feature_scores.map(toObject).filter((item): item is JsonObject => Boolean(item))
+    : [];
 
-  const confidence = String(identity.confidence ?? "").toLowerCase();
-  if (confidence === "medium") {
-    const evidence = Array.isArray(identity.evidence)
-      ? identity.evidence.map(String).filter(Boolean)
-      : [];
-    return evidence.length > 0
-      ? `Same-suitcase check passed with medium confidence: ${evidence.join(" ")}`
-      : "Same-suitcase check passed with medium confidence.";
+  let observableWeight = 0;
+  let matchedWeight = 0;
+  let mismatchedWeight = 0;
+  let unknownWeight = 0;
+  const mismatches: string[] = [];
+
+  for (const feature of features) {
+    const observable = feature.observable === true;
+    const weight = identityFeatureWeight(feature);
+    const match = String(feature.match ?? "").toLowerCase();
+    const name = String(feature.feature ?? "feature");
+    const evidence = String(feature.evidence ?? "").trim();
+
+    if (!observable || weight <= 0) continue;
+
+    observableWeight += weight;
+    if (match === "match") matchedWeight += weight;
+    else if (match === "mismatch") {
+      mismatchedWeight += weight;
+      mismatches.push(evidence ? `${name}: ${evidence}` : `${name}: mismatch`);
+    } else {
+      unknownWeight += weight;
+    }
   }
 
-  return "";
+  const modelScore = numericValue(identity.confidence_score);
+  const score =
+    observableWeight > 0
+      ? matchedWeight / observableWeight
+      : modelScore > 0
+        ? modelScore
+        : fallbackIdentityScore(identity);
+
+  return {
+    score: clamp(score, 0, 1),
+    observableWeight,
+    matchedWeight,
+    mismatchedWeight,
+    unknownWeight,
+    mismatches,
+  };
+}
+
+function identityFeatureWeight(feature: JsonObject) {
+  const featureName = String(feature.feature ?? "").toLowerCase();
+  const declared = numericValue(feature.weight);
+  const fallbackWeights: Record<string, number> = {
+    unique_marks: 30,
+    color: 20,
+    material: 15,
+    texture_pattern: 15,
+    wheels: 15,
+    handles: 15,
+    zipper_pockets_locks: 15,
+    shape_proportion: 10,
+  };
+  return declared > 0 ? declared : (fallbackWeights[featureName] ?? 0);
+}
+
+function hardIdentityMismatchReasons(
+  identity: JsonObject,
+  score: ReturnType<typeof scoreIdentityEvidence>,
+) {
+  const explicit = Array.isArray(identity.hard_mismatches)
+    ? identity.hard_mismatches
+        .map(toObject)
+        .filter((item): item is JsonObject => Boolean(item))
+        .map((item) => {
+          const feature = String(item.feature ?? "identity");
+          const reason = String(item.reason ?? "").trim();
+          return reason ? `${feature}: ${reason}` : `${feature}: hard mismatch`;
+        })
+    : [];
+
+  return uniqueStrings([...explicit, ...score.mismatches]);
+}
+
+function identityEvidence(identity: JsonObject | null) {
+  return Array.isArray(identity?.evidence) ? identity.evidence.map(String).filter(Boolean) : [];
+}
+
+function operatorIdentityMessage(identity: JsonObject | null) {
+  return typeof identity?.operator_message === "string" && identity.operator_message.trim()
+    ? identity.operator_message.trim()
+    : "";
+}
+
+function fallbackIdentityScore(identity: JsonObject) {
+  const confidence = String(identity.confidence ?? "").toLowerCase();
+  if (confidence === "high") return 0.78;
+  if (confidence === "medium") return 0.62;
+  return 0.35;
+}
+
+function clamp(value: number, min: number, max: number) {
+  if (!Number.isFinite(value)) return min;
+  return Math.min(max, Math.max(min, value));
+}
+
+function formatPercent(value: number) {
+  return `${Math.round(clamp(value, 0, 1) * 100)}%`;
+}
+
+function uniqueStrings(values: string[]) {
+  return values.filter((value, index) => value.trim() && values.indexOf(value) === index);
 }
 
 function hasViewIssue(view: JsonObject | null) {
