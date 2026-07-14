@@ -432,12 +432,20 @@ function parseDataUrl(dataUrl: string) {
 function getGeminiApiKey() {
   // Prefer project-local env files in dev so a stale shell variable cannot
   // override the key the operator is editing in this repo.
+  const keyNames = ["GEMINI_API_KEY_2", "GEMINI_API_KEY"];
   for (const file of [".env.local", ".env"]) {
-    const value = readEnvValue(file, "GEMINI_API_KEY");
+    for (const keyName of keyNames) {
+      const value = readEnvValue(file, keyName);
+      if (value) return value;
+    }
+  }
+
+  for (const keyName of keyNames) {
+    const value = normalizeEnvValue(process.env[keyName]);
     if (value) return value;
   }
 
-  return normalizeEnvValue(process.env.GEMINI_API_KEY);
+  return "";
 }
 
 function readEnvValue(file: string, name: string) {
