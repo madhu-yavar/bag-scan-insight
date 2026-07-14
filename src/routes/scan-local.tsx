@@ -101,8 +101,10 @@ function LocalScanPage() {
         return false;
       }
 
-      setViewStatuses((current) => ({ ...current, [view]: "ok" }));
-      toast.success(`${titleCase(view)} photo accepted`);
+      const warning = singleViewValidationWarning(validation);
+      setViewStatuses((current) => ({ ...current, [view]: warning ? "review" : "ok" }));
+      if (warning) toast.warning(`${titleCase(view)} photo accepted for review: ${warning}`);
+      else toast.success(`${titleCase(view)} photo accepted`);
       return true;
     } catch (error) {
       setViewStatuses((current) => ({ ...current, [view]: "issue" }));
@@ -753,6 +755,11 @@ function singleViewRetakeReason(validation: JsonObject | null) {
   if (validation.lighting !== "good") return `Lighting is ${formatValue(validation.lighting)}.`;
   if (validation.sharpness !== "sharp") return `Photo is ${formatValue(validation.sharpness)}.`;
   return "Retake this photo with the requested angle clearly visible.";
+}
+
+function singleViewValidationWarning(validation: JsonObject | null) {
+  const warning = validation?.validation_warning;
+  return typeof warning === "string" && warning.trim() ? warning.trim() : "";
 }
 
 function hasViewIssue(view: JsonObject | null) {
