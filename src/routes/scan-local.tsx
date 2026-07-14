@@ -24,7 +24,10 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { requireSignedIn } from "@/lib/auth-helpers";
 import { VIEWS, type BaggageView } from "@/lib/baggage-views";
-import { analyzeBaggageWithGemini } from "@/lib/local-gemini.functions";
+import {
+  analyzeBaggageWithGemini,
+  validateBaggageViewWithGemini,
+} from "@/lib/local-gemini.functions";
 import {
   saveLocalScan,
   updateLocalScanApprovals,
@@ -54,6 +57,7 @@ const MODEL = "gemini-3.5-flash";
 
 function LocalScanPage() {
   const analyzeWithGemini = useServerFn(analyzeBaggageWithGemini);
+  const validateViewWithGemini = useServerFn(validateBaggageViewWithGemini);
   const saveScan = useServerFn(saveLocalScan);
   const updateScanApprovals = useServerFn(updateLocalScanApprovals);
   const [images, setImages] = useState<ImageMap>({});
@@ -72,6 +76,40 @@ function LocalScanPage() {
 
   const capturedCount = useMemo(() => VIEWS.filter((view) => images[view.key]).length, [images]);
   const allCaptured = capturedCount === VIEWS.length;
+
+  const validateCapturedView = async (view: BaggageView, dataUrl: string) => {
+    setViewStatuses((current) => {
+      const updated = { ...current };
+      delete updated[view];
+      return updated;
+    });
+
+    try {
+      const result = await validateViewWithGemini({
+        data: {
+          model: MODEL,
+          view,
+          data_url: dataUrl,
+        },
+      });
+      const validation = toObject(result.validation);
+      const accepted = isSingleViewAccepted(validation, view);
+
+      if (!accepted) {
+        setViewStatuses((current) => ({ ...current, [view]: "issue" }));
+        toast.error(`${titleCase(view)} photo rejected: ${singleViewRetakeReason(validation)}`);
+        return false;
+      }
+
+      setViewStatuses((current) => ({ ...current, [view]: "ok" }));
+      toast.success(`${titleCase(view)} photo accepted`);
+      return true;
+    } catch (error) {
+      setViewStatuses((current) => ({ ...current, [view]: "issue" }));
+      toast.error(error instanceof Error ? error.message : "Could not validate photo");
+      return false;
+    }
+  };
 
   const analyze = async () => {
     if (!allCaptured || submitting) return;
@@ -140,7 +178,7 @@ function LocalScanPage() {
       setViewStatuses((current) => {
         const updated = { ...current };
         changedViews.forEach((view) => {
-          delete updated[view];
+          if (!next[view]) delete updated[view];
         });
         return updated;
       });
@@ -248,6 +286,7 @@ function LocalScanPage() {
             ref={captureApiRef}
             images={images}
             onChange={handleImagesChange}
+            onValidateImage={validateCapturedView}
             activeView={activeView}
             onActiveViewChange={setActiveView}
             viewStatuses={viewStatuses}
@@ -678,6 +717,42 @@ function normalizeView(value: unknown): BaggageView | null {
     .toLowerCase()
     .replace(/\s+/g, "_");
   return VIEWS.some((view) => view.key === normalized) ? (normalized as BaggageView) : null;
+}
+
+function isSingleViewAccepted(validation: JsonObject | null, expected: BaggageView) {
+  if (!validation) return false;
+  const detected = normalizeView(validation.detected_view);
+  return (
+    validation.status === "accepted" &&
+    validation.retake_required !== true &&
+    validation.view_match === true &&
+    detected === expected &&
+    validation.bag_visible === "full" &&
+    validation.multiple_bags_visible !== true &&
+    numericValue(validation.bag_count) <= 1 &&
+    validation.framing === "good" &&
+    validation.lighting === "good" &&
+    validation.sharpness === "sharp"
+  );
+}
+
+function singleViewRetakeReason(validation: JsonObject | null) {
+  if (!validation) return "Could not validate this photo. Retake it.";
+  if (validation.retake_reason) return formatValue(validation.retake_reason);
+
+  const expected = normalizeView(validation.submitted_slot);
+  const detected = normalizeView(validation.detected_view);
+  if (expected && detected && expected !== detected) {
+    return `Expected ${titleCase(expected)} view, detected ${titleCase(detected)} view.`;
+  }
+  if (validation.bag_visible !== "full") return "Bag must be fully visible.";
+  if (validation.multiple_bags_visible === true || numericValue(validation.bag_count) > 1) {
+    return "Only one baggage item can be visible.";
+  }
+  if (validation.framing !== "good") return `Framing is ${formatValue(validation.framing)}.`;
+  if (validation.lighting !== "good") return `Lighting is ${formatValue(validation.lighting)}.`;
+  if (validation.sharpness !== "sharp") return `Photo is ${formatValue(validation.sharpness)}.`;
+  return "Retake this photo with the requested angle clearly visible.";
 }
 
 function hasViewIssue(view: JsonObject | null) {

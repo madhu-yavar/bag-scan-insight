@@ -80,6 +80,37 @@ Validation rules:
 
 If dimensions cannot be estimated because the required views are not usable or do not show the same bag, use null values and explain the limitation in dimensions_cm.basis or notes.`;
 
+const SINGLE_VIEW_PROMPT = `You are validating exactly one baggage photo before the operator can continue to the next required view.
+
+The operator will provide the expected submitted slot: front, back, top, or side.
+Inspect the image and decide whether it is acceptable for that exact slot.
+
+Rules:
+- Accept only when exactly one baggage item is visible, the expected angle is clearly shown, and the bag is usable for inspection.
+- Reject when the submitted photo shows a different angle than expected. For example, reject a side view submitted as front, a front/back view submitted as side, or any non-top view submitted as top.
+- Reject when the bag is missing, heavily cropped, too far away, too close, heavily blurred, poorly lit, overexposed, or when multiple bags are visible.
+- For front and back, use visible face details and handle/pocket/wheel layout to distinguish them when possible. If uncertain between front/back, reject and ask for a clearer view.
+- For top, the photo must be looking down enough to inspect top handles/zippers and depth. A normal front/back/side standing view is not top.
+- For side, the photo must show the bag profile/depth. A normal front/back face is not side.
+
+Return STRICT JSON only:
+{
+  "submitted_slot": "front|back|top|side",
+  "detected_view": "front|back|top|side|unknown",
+  "status": "accepted|rejected",
+  "view_match": true,
+  "bag_visible": "full|partial|not_visible",
+  "framing": "good|too_far|too_close|cropped|unknown",
+  "lighting": "good|low_light|overexposed|unknown",
+  "sharpness": "sharp|soft|blurred|unknown",
+  "bag_count": number,
+  "multiple_bags_visible": false,
+  "retake_required": false,
+  "retake_reason": null
+}
+
+Use status "accepted" only when retake_required is false and view_match is true. Make retake_reason short and operator-facing.`;
+
 const AnalyzeInput = z.object({
   accepted_review_views: z.array(z.enum(["front", "back", "top", "side"])).default([]),
   images: z
@@ -91,6 +122,14 @@ const AnalyzeInput = z.object({
     )
     .min(1)
     .max(4),
+  model: z
+    .enum(["gemini-3.5-flash", "gemini-2.5-flash", "gemini-2.5-pro"])
+    .default("gemini-3.5-flash"),
+});
+
+const ValidateViewInput = z.object({
+  view: z.enum(["front", "back", "top", "side"]),
+  data_url: z.string().startsWith("data:image/"),
   model: z
     .enum(["gemini-3.5-flash", "gemini-2.5-flash", "gemini-2.5-pro"])
     .default("gemini-3.5-flash"),
@@ -162,6 +201,65 @@ export const analyzeBaggageWithGemini = createServerFn({ method: "POST" })
 
     const analysis = parseJsonResponse(raw);
     return { analysis, model: data.model };
+  });
+
+export const validateBaggageViewWithGemini = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .validator((input: unknown) => ValidateViewInput.parse(input))
+  .handler(async ({ data }) => {
+    const key = getGeminiApiKey();
+    if (!key) {
+      throw new Error("GEMINI_API_KEY missing. Add it to .env.local and restart npm run dev.");
+    }
+
+    const parsed = parseDataUrl(data.data_url);
+    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
+      data.model,
+    )}:generateContent?key=${encodeURIComponent(key)}`;
+
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [
+          {
+            role: "user",
+            parts: [
+              { text: SINGLE_VIEW_PROMPT },
+              { text: `Expected submitted slot: ${data.view}` },
+              {
+                inlineData: {
+                  mimeType: parsed.mimeType,
+                  data: parsed.base64,
+                },
+              },
+            ],
+          },
+        ],
+        generationConfig: {
+          temperature: 0.05,
+          responseMimeType: "application/json",
+        },
+      }),
+    });
+
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(`Gemini API error ${response.status}: ${text.slice(0, 300)}`);
+    }
+
+    const payload = (await response.json()) as {
+      candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+    };
+    const raw = payload.candidates
+      ?.flatMap((candidate) => candidate.content?.parts ?? [])
+      .map((part) => part.text ?? "")
+      .join("\n")
+      .trim();
+
+    if (!raw) throw new Error("Gemini returned an empty response.");
+
+    return { validation: parseJsonResponse(raw), model: data.model };
   });
 
 function parseDataUrl(dataUrl: string) {
