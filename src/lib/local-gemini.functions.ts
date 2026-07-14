@@ -133,6 +133,61 @@ JSON shape:
 
 Reject if the angle does not match the expected slot, the full bag is not visible, more than one bag is visible, or the photo is unusable.`;
 
+const IDENTITY_PROMPT = `You are validating whether multiple baggage photos show the same physical suitcase.
+
+You will receive 2 to 4 submitted slots. One slot is the newly uploaded photo. Compare all photos as identity evidence only. Do not extract baggage dimensions or general metadata.
+
+This is an adversarial validation task. Operators may accidentally or deliberately mix photos from two similar suitcases. Do not assume matching slot labels mean the same suitcase.
+
+Compare durable identity signals across photos:
+- primary and secondary colors
+- hard-shell vs fabric material
+- shell texture, ribbing, panels, seams, and corner shape
+- wheel count, wheel style, and wheel placement
+- telescopic handle shape and position
+- side/top handles and straps
+- zipper tracks, pockets, locks, expansion seams
+- logos, tags, stickers, labels, scuffs, dents, stains, tape, or unique marks
+- overall proportions and edge/corner design
+
+Rules:
+- Set same_baggage false when any submitted slot is visually incompatible with the reference suitcase.
+- Set same_baggage false when the newly uploaded photo conflicts with previously accepted photos.
+- Set confidence low when overlap is too weak to verify identity, even if no direct contradiction is visible.
+- Opposite sides may have different pockets or labels, but core construction, material, color family, wheel/handle style, and distinctive marks must be compatible.
+- When in doubt, prefer needs-retake over accepting a mixed-bag set.
+- recommended_retake_slots should include the minimum slots the operator should retake. Prefer the newly uploaded slot when it conflicts with already accepted slots.
+
+Return STRICT JSON only:
+{
+  "same_baggage": true,
+  "confidence": "high|medium|low",
+  "new_view": "front|back|top|side",
+  "reference_slots": ["front"],
+  "conflicting_slots": [],
+  "recommended_retake_slots": [],
+  "evidence": ["short concrete visual evidence"],
+  "operator_message": "short operator-facing result"
+}`;
+
+const IDENTITY_RETRY_PROMPT = `Compare these baggage photos and decide if they show the same physical suitcase.
+
+Return only valid JSON. No markdown. No prose.
+
+JSON:
+{
+  "same_baggage": true,
+  "confidence": "high|medium|low",
+  "new_view": "front|back|top|side",
+  "reference_slots": ["front"],
+  "conflicting_slots": [],
+  "recommended_retake_slots": [],
+  "evidence": ["visible matching or conflicting identity signals"],
+  "operator_message": "short result"
+}
+
+Use same_baggage false if any photo appears to be a different suitcase. Use confidence low when identity cannot be verified.`;
+
 const AnalyzeInput = z.object({
   accepted_review_views: z.array(z.enum(["front", "back", "top", "side"])).default([]),
   images: z
@@ -152,6 +207,22 @@ const AnalyzeInput = z.object({
 const ValidateViewInput = z.object({
   view: z.enum(["front", "back", "top", "side"]),
   data_url: z.string().startsWith("data:image/"),
+  model: z
+    .enum(["gemini-3.5-flash", "gemini-2.5-flash", "gemini-2.5-pro"])
+    .default("gemini-3.5-flash"),
+});
+
+const ValidateIdentityInput = z.object({
+  new_view: z.enum(["front", "back", "top", "side"]),
+  images: z
+    .array(
+      z.object({
+        view: z.enum(["front", "back", "top", "side"]),
+        data_url: z.string().startsWith("data:image/"),
+      }),
+    )
+    .min(2)
+    .max(4),
   model: z
     .enum(["gemini-3.5-flash", "gemini-2.5-flash", "gemini-2.5-pro"])
     .default("gemini-3.5-flash"),
@@ -281,6 +352,55 @@ export const validateBaggageViewWithGemini = createServerFn({ method: "POST" })
     };
   });
 
+export const validateBaggageIdentityWithGemini = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .validator((input: unknown) => ValidateIdentityInput.parse(input))
+  .handler(async ({ data }) => {
+    const key = getGeminiApiKey();
+    if (!key) {
+      throw new Error("GEMINI_API_KEY missing. Add it to .env.local and restart npm run dev.");
+    }
+
+    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
+      data.model,
+    )}:generateContent?key=${encodeURIComponent(key)}`;
+    const imageParts = identityImageParts(data.images);
+
+    const raw = await requestGeminiText(endpoint, [
+      { text: IDENTITY_PROMPT },
+      { text: `Newly uploaded slot: ${data.new_view}` },
+      ...imageParts,
+    ]);
+    const identity = tryParseJsonResponse(raw);
+    if (identity) return { identity, model: data.model };
+
+    console.warn("Gemini returned non-JSON output during baggage identity validation.", {
+      newView: data.new_view,
+      rawPreview: raw.slice(0, 500),
+    });
+
+    const retryRaw = await requestGeminiText(endpoint, [
+      { text: IDENTITY_RETRY_PROMPT },
+      { text: `Newly uploaded slot: ${data.new_view}` },
+      ...imageParts,
+    ]);
+    const retryIdentity = tryParseJsonResponse(retryRaw);
+    if (retryIdentity) return { identity: retryIdentity, model: data.model };
+
+    console.warn("Gemini returned non-JSON output during baggage identity validation retry.", {
+      newView: data.new_view,
+      rawPreview: retryRaw.slice(0, 500),
+    });
+
+    return {
+      identity: rejectedIdentityValidation(
+        data.new_view,
+        "AI could not verify that this photo belongs to the same suitcase. Retake the newly uploaded photo.",
+      ),
+      model: data.model,
+    };
+  });
+
 function parseDataUrl(dataUrl: string) {
   const match = /^data:(image\/[a-z0-9.+-]+);base64,(.+)$/i.exec(dataUrl);
   if (!match) throw new Error("Image payload must be a base64 data URL.");
@@ -364,6 +484,34 @@ function acceptedReviewViewValidation(view: ViewSlot, reason: string) {
     retake_reason: null,
     validation_warning: reason,
   };
+}
+
+function rejectedIdentityValidation(view: ViewSlot, reason: string) {
+  return {
+    same_baggage: false,
+    confidence: "low",
+    new_view: view,
+    reference_slots: [],
+    conflicting_slots: [view],
+    recommended_retake_slots: [view],
+    evidence: [reason],
+    operator_message: reason,
+  };
+}
+
+function identityImageParts(images: Array<{ view: ViewSlot; data_url: string }>) {
+  const parts: Array<Record<string, unknown>> = [];
+  for (const image of images) {
+    const parsed = parseDataUrl(image.data_url);
+    parts.push({ text: `Submitted slot: ${image.view}` });
+    parts.push({
+      inlineData: {
+        mimeType: parsed.mimeType,
+        data: parsed.base64,
+      },
+    });
+  }
+  return parts;
 }
 
 function tryParseJsonResponse(raw: string) {

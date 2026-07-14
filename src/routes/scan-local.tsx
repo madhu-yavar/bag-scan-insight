@@ -26,6 +26,7 @@ import { requireSignedIn } from "@/lib/auth-helpers";
 import { VIEWS, type BaggageView } from "@/lib/baggage-views";
 import {
   analyzeBaggageWithGemini,
+  validateBaggageIdentityWithGemini,
   validateBaggageViewWithGemini,
 } from "@/lib/local-gemini.functions";
 import {
@@ -57,6 +58,7 @@ const MODEL = "gemini-3.5-flash";
 
 function LocalScanPage() {
   const analyzeWithGemini = useServerFn(analyzeBaggageWithGemini);
+  const validateIdentityWithGemini = useServerFn(validateBaggageIdentityWithGemini);
   const validateViewWithGemini = useServerFn(validateBaggageViewWithGemini);
   const saveScan = useServerFn(saveLocalScan);
   const updateScanApprovals = useServerFn(updateLocalScanApprovals);
@@ -101,16 +103,67 @@ function LocalScanPage() {
         return false;
       }
 
-      const warning = singleViewValidationWarning(validation);
-      setViewStatuses((current) => ({ ...current, [view]: warning ? "review" : "ok" }));
-      if (warning) toast.warning(`${titleCase(view)} photo accepted for review: ${warning}`);
-      else toast.success(`${titleCase(view)} photo accepted`);
+      const identityResult = await validateCapturedIdentity(view, dataUrl);
+      if (!identityResult.accepted) {
+        setViewStatuses((current) => {
+          const updated = { ...current, [view]: "issue" as const };
+          for (const slot of identityResult.issueSlots) updated[slot] = "issue";
+          return updated;
+        });
+        toast.error(`${titleCase(view)} photo rejected: ${identityResult.reason}`);
+        return false;
+      }
+
+      const warnings = [singleViewValidationWarning(validation), identityResult.warning].filter(
+        Boolean,
+      );
+      setViewStatuses((current) => ({ ...current, [view]: warnings.length ? "review" : "ok" }));
+      if (warnings.length) {
+        toast.warning(`${titleCase(view)} photo accepted for review: ${warnings.join(" ")}`);
+      } else toast.success(`${titleCase(view)} photo accepted`);
       return true;
     } catch (error) {
       setViewStatuses((current) => ({ ...current, [view]: "issue" }));
       toast.error(error instanceof Error ? error.message : "Could not validate photo");
       return false;
     }
+  };
+
+  const validateCapturedIdentity = async (view: BaggageView, dataUrl: string) => {
+    const candidateImages = { ...images, [view]: dataUrl };
+    const identityImages = VIEWS.filter((item) => candidateImages[item.key]).map((item) => ({
+      view: item.key,
+      data_url: candidateImages[item.key]!,
+    }));
+
+    if (identityImages.length < 2) {
+      return { accepted: true, warning: "", reason: "", issueSlots: [] as BaggageView[] };
+    }
+
+    const result = await validateIdentityWithGemini({
+      data: {
+        model: MODEL,
+        new_view: view,
+        images: identityImages,
+      },
+    });
+    const identity = toObject(result.identity);
+
+    if (!isIdentityAccepted(identity)) {
+      return {
+        accepted: false,
+        warning: "",
+        reason: identityRetakeReason(identity, view),
+        issueSlots: identityIssueSlots(identity, view),
+      };
+    }
+
+    return {
+      accepted: true,
+      warning: identityValidationWarning(identity),
+      reason: "",
+      issueSlots: [] as BaggageView[],
+    };
   };
 
   const analyze = async () => {
@@ -760,6 +813,68 @@ function singleViewRetakeReason(validation: JsonObject | null) {
 function singleViewValidationWarning(validation: JsonObject | null) {
   const warning = validation?.validation_warning;
   return typeof warning === "string" && warning.trim() ? warning.trim() : "";
+}
+
+function isIdentityAccepted(identity: JsonObject | null) {
+  if (!identity) return false;
+  if (identity.same_baggage !== true) return false;
+
+  const confidence = String(identity.confidence ?? "").toLowerCase();
+  return confidence === "high" || confidence === "medium";
+}
+
+function identityRetakeReason(identity: JsonObject | null, newView: BaggageView) {
+  if (!identity) {
+    return "Could not verify that this photo belongs to the same suitcase. Retake it.";
+  }
+
+  const message =
+    typeof identity.operator_message === "string" && identity.operator_message.trim()
+      ? identity.operator_message.trim()
+      : "";
+  if (message) return message;
+
+  const evidence = Array.isArray(identity.evidence)
+    ? identity.evidence.map(String).filter(Boolean)
+    : [];
+  if (evidence.length > 0) return evidence.join(" ");
+
+  const confidence = String(identity.confidence ?? "").toLowerCase();
+  if (identity.same_baggage !== true) {
+    return `${titleCase(newView)} appears to show a different suitcase. Retake this photo.`;
+  }
+  if (confidence === "low") {
+    return "Same-suitcase confidence is too low. Retake this photo with clearer shared identity details.";
+  }
+
+  return "Retake this photo so it clearly matches the previously captured suitcase.";
+}
+
+function identityIssueSlots(identity: JsonObject | null, newView: BaggageView) {
+  if (!identity) return [newView];
+
+  const slots = uniqueViews([
+    ...normalizeViewArray(identity.recommended_retake_slots),
+    ...normalizeViewArray(identity.conflicting_slots),
+    newView,
+  ]);
+  return slots.length > 0 ? slots : [newView];
+}
+
+function identityValidationWarning(identity: JsonObject | null) {
+  if (!identity) return "";
+
+  const confidence = String(identity.confidence ?? "").toLowerCase();
+  if (confidence === "medium") {
+    const evidence = Array.isArray(identity.evidence)
+      ? identity.evidence.map(String).filter(Boolean)
+      : [];
+    return evidence.length > 0
+      ? `Same-suitcase check passed with medium confidence: ${evidence.join(" ")}`
+      : "Same-suitcase check passed with medium confidence.";
+  }
+
+  return "";
 }
 
 function hasViewIssue(view: JsonObject | null) {
