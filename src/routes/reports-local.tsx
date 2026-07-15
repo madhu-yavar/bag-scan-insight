@@ -7,6 +7,7 @@ import { AppHeader } from "@/components/AppHeader";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { requireSignedIn } from "@/lib/auth-helpers";
+import { listCloudScans, type CloudScanSummary } from "@/lib/cloud-scan-store.functions";
 import { listLocalScans, type LocalScanSummary } from "@/lib/local-scan-store.functions";
 
 export const Route = createFileRoute("/reports-local")({
@@ -27,8 +28,10 @@ export const Route = createFileRoute("/reports-local")({
 });
 
 function LocalReportsPage() {
-  const loadScans = useServerFn(listLocalScans);
-  const [scans, setScans] = useState<LocalScanSummary[]>([]);
+  const loadCloudScans = useServerFn(listCloudScans);
+  const loadLocalScans = useServerFn(listLocalScans);
+  const [scans, setScans] = useState<Array<CloudScanSummary | LocalScanSummary>>([]);
+  const [source, setSource] = useState<"cloud" | "local">("cloud");
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -37,11 +40,34 @@ function LocalReportsPage() {
     let active = true;
     setLoading(true);
     setError(null);
-    loadScans({ data: { limit: 100 } })
-      .then((result) => {
+
+    async function loadReports() {
+      try {
+        const cloud = await loadCloudScans({ data: { limit: 100 } });
+        let localScans: LocalScanSummary[] = [];
+        try {
+          const local = await loadLocalScans({ data: { limit: 100 } });
+          localScans = local.scans;
+        } catch {
+          localScans = [];
+        }
+        const cloudIds = new Set(cloud.scans.map((scan) => scan.id));
+        const merged = [
+          ...cloud.scans,
+          ...localScans.filter((scan) => !cloudIds.has(scan.id)),
+        ].slice(0, 100);
         if (!active) return;
-        setScans(result.scans);
-      })
+        setScans(merged);
+        setSource(cloud.scans.length > 0 ? "cloud" : "local");
+      } catch {
+        const local = await loadLocalScans({ data: { limit: 100 } });
+        if (!active) return;
+        setScans(local.scans);
+        setSource("local");
+      }
+    }
+
+    loadReports()
       .catch((err: unknown) => {
         if (!active) return;
         setError(err instanceof Error ? err.message : "Could not load saved reports.");
@@ -53,7 +79,7 @@ function LocalReportsPage() {
     return () => {
       active = false;
     };
-  }, [loadScans]);
+  }, [loadCloudScans, loadLocalScans]);
 
   const filteredScans = scans.filter((scan) => {
     const text = [
@@ -76,7 +102,11 @@ function LocalReportsPage() {
         <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
           <div>
             <h1 className="text-3xl font-bold sm:text-4xl">Saved reports</h1>
-            <p className="mt-2 text-muted-foreground">Local scan reports saved on this machine.</p>
+            <p className="mt-2 text-muted-foreground">
+              {source === "cloud"
+                ? "Cloud scan reports saved in Supabase."
+                : "Local scan reports saved on this machine."}
+            </p>
           </div>
           <Button className="bg-gradient-brand text-primary-foreground shadow-brand" asChild>
             <Link to="/scan-local">

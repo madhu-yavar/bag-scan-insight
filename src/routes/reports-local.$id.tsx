@@ -7,6 +7,7 @@ import { AppHeader } from "@/components/AppHeader";
 import { Button } from "@/components/ui/button";
 import { requireSignedIn } from "@/lib/auth-helpers";
 import { VIEWS } from "@/lib/baggage-views";
+import { getCloudScan, type CloudScanDetail } from "@/lib/cloud-scan-store.functions";
 import { getLocalScan, type LocalScanDetail } from "@/lib/local-scan-store.functions";
 
 export const Route = createFileRoute("/reports-local/$id")({
@@ -27,11 +28,13 @@ export const Route = createFileRoute("/reports-local/$id")({
 });
 
 type JsonObject = Record<string, unknown>;
+type SavedScanDetail = CloudScanDetail | LocalScanDetail;
 
 function LocalReportDetailPage() {
   const { id } = useParams({ from: "/reports-local/$id" });
-  const loadScan = useServerFn(getLocalScan);
-  const [scan, setScan] = useState<LocalScanDetail | null>(null);
+  const loadCloudScan = useServerFn(getCloudScan);
+  const loadLocalScan = useServerFn(getLocalScan);
+  const [scan, setScan] = useState<SavedScanDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -39,11 +42,17 @@ function LocalReportDetailPage() {
     let active = true;
     setLoading(true);
     setError(null);
-    loadScan({ data: { id } })
+    loadCloudScan({ data: { id } })
       .then((result) => {
         if (!active) return;
         setScan(result.scan);
       })
+      .catch(() =>
+        loadLocalScan({ data: { id } }).then((result) => {
+          if (!active) return;
+          setScan(result.scan);
+        }),
+      )
       .catch((err: unknown) => {
         if (!active) return;
         setError(err instanceof Error ? err.message : "Could not load report.");
@@ -55,7 +64,7 @@ function LocalReportDetailPage() {
     return () => {
       active = false;
     };
-  }, [id, loadScan]);
+  }, [id, loadCloudScan, loadLocalScan]);
 
   const exportReport = () => {
     if (!scan) return;
@@ -137,7 +146,7 @@ function LocalReportDetailPage() {
   );
 }
 
-function PhotoGrid({ scan }: { scan: LocalScanDetail }) {
+function PhotoGrid({ scan }: { scan: SavedScanDetail }) {
   return (
     <section className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
       {VIEWS.map((view) => {
@@ -169,7 +178,7 @@ function PhotoGrid({ scan }: { scan: LocalScanDetail }) {
   );
 }
 
-function ReportSummary({ scan }: { scan: LocalScanDetail }) {
+function ReportSummary({ scan }: { scan: SavedScanDetail }) {
   const analysis = toObject(scan.analysis);
   const colors = toObject(analysis?.colors);
   const dimensions = scan.manualDimensionsCm
@@ -244,7 +253,7 @@ function toObject(value: unknown): JsonObject | null {
 }
 
 function dimensionsToReportObject(
-  dimensions: NonNullable<LocalScanDetail["manualDimensionsCm"]>,
+  dimensions: NonNullable<SavedScanDetail["manualDimensionsCm"]>,
 ): JsonObject {
   return {
     ...dimensions,

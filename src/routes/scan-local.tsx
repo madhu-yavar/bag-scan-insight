@@ -30,6 +30,11 @@ import {
   validateBaggageViewWithGemini,
 } from "@/lib/local-gemini.functions";
 import {
+  saveCloudScan,
+  updateCloudScanApprovals,
+  type CloudScanSummary,
+} from "@/lib/cloud-scan-store.functions";
+import {
   saveLocalScan,
   updateLocalScanApprovals,
   type LocalScanSummary,
@@ -59,12 +64,18 @@ const IDENTITY_MIN_OBSERVABLE_WEIGHT = 45;
 const IDENTITY_ACCEPT_SCORE = 0.82;
 const IDENTITY_STRONG_SCORE = 0.92;
 
+function isCloudSavedScan(scan: CloudScanSummary | LocalScanSummary): scan is CloudScanSummary {
+  return "storage" in scan && scan.storage === "cloud";
+}
+
 function LocalScanPage() {
   const analyzeWithGemini = useServerFn(analyzeBaggageWithGemini);
   const validateIdentityWithGemini = useServerFn(validateBaggageIdentityWithGemini);
   const validateViewWithGemini = useServerFn(validateBaggageViewWithGemini);
-  const saveScan = useServerFn(saveLocalScan);
-  const updateScanApprovals = useServerFn(updateLocalScanApprovals);
+  const saveCloud = useServerFn(saveCloudScan);
+  const saveLocal = useServerFn(saveLocalScan);
+  const updateCloudApprovals = useServerFn(updateCloudScanApprovals);
+  const updateLocalApprovals = useServerFn(updateLocalScanApprovals);
   const [images, setImages] = useState<ImageMap>({});
   const [activeView, setActiveView] = useState<BaggageView>("front");
   const [viewStatuses, setViewStatuses] = useState<Partial<Record<BaggageView, ViewStatus>>>({});
@@ -74,7 +85,7 @@ function LocalScanPage() {
   const [name, setName] = useState("");
   const [notes, setNotes] = useState("");
   const [analysis, setAnalysis] = useState<unknown>(null);
-  const [savedScan, setSavedScan] = useState<LocalScanSummary | null>(null);
+  const [savedScan, setSavedScan] = useState<CloudScanSummary | LocalScanSummary | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const captureRef = useRef<HTMLDivElement | null>(null);
   const captureApiRef = useRef<BaggageCaptureHandle | null>(null);
@@ -194,28 +205,38 @@ function LocalScanPage() {
       else if (status === "needs_review") toast.warning("Review capture");
       else toast.success("Baggage profile ready");
 
+      const savePayload = {
+        reference: name,
+        notes,
+        model: MODEL,
+        approved_review_views: approvedViews,
+        images: VIEWS.map((view) => ({
+          view: view.key,
+          data_url: images[view.key]!,
+        })),
+        analysis: result.analysis,
+      };
+
       try {
-        const saved = await saveScan({
-          data: {
-            reference: name,
-            notes,
-            model: MODEL,
-            approved_review_views: approvedViews,
-            images: VIEWS.map((view) => ({
-              view: view.key,
-              data_url: images[view.key]!,
-            })),
-            analysis: result.analysis,
-          },
-        });
+        const saved = await saveCloud({ data: savePayload });
         setSavedScan(saved.scan);
-        toast.success("Scan saved");
-      } catch (saveError) {
-        toast.error(
-          saveError instanceof Error
-            ? `Scan complete, but save failed: ${saveError.message}`
-            : "Scan complete, but save failed",
-        );
+        toast.success("Scan saved to cloud");
+      } catch (cloudSaveError) {
+        try {
+          const saved = await saveLocal({ data: savePayload });
+          setSavedScan(saved.scan);
+          toast.warning(
+            cloudSaveError instanceof Error
+              ? `Cloud save failed; saved locally instead: ${cloudSaveError.message}`
+              : "Cloud save failed; saved locally instead",
+          );
+        } catch (localSaveError) {
+          toast.error(
+            localSaveError instanceof Error
+              ? `Scan complete, but save failed: ${localSaveError.message}`
+              : "Scan complete, but save failed",
+          );
+        }
       }
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Scan failed");
@@ -283,12 +304,19 @@ function LocalScanPage() {
 
     if (savedScan) {
       try {
-        const updated = await updateScanApprovals({
-          data: {
-            id: savedScan.id,
-            approved_review_views: approvedViews,
-          },
-        });
+        const updated = isCloudSavedScan(savedScan)
+          ? await updateCloudApprovals({
+              data: {
+                id: savedScan.id,
+                approved_review_views: approvedViews,
+              },
+            })
+          : await updateLocalApprovals({
+              data: {
+                id: savedScan.id,
+                approved_review_views: approvedViews,
+              },
+            });
         setSavedScan(updated.scan);
       } catch (error) {
         toast.error(error instanceof Error ? error.message : "Photo approved, but save failed");

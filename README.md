@@ -28,7 +28,8 @@ Open:
 ## Modes
 
 - `/scan-local`: browser captures photos, local server function calls Gemini directly with `GEMINI_API_KEY_1`, requires Supabase auth.
-- `/reports-local`: locally saved scan reports and photo sets.
+- `/reports-local`: saved scan reports and photo sets. Reads Supabase cloud storage first, with local fallback.
+- `/dashboard`: cloud analytics dashboard for dimensions, baggage type, material, condition, damage, and capture quality.
 - `/scan`: original cloud mode, requires Supabase auth/storage/database and Lovable AI Gateway config.
 
 ## Auth
@@ -37,9 +38,20 @@ The app uses Supabase email/password sign-in. Create the two operator accounts i
 Authentication -> Users and mark their emails confirmed. Password recovery links are handled at
 `/reset-password`; Supabase Auth URL Configuration must not point to `localhost:3000`.
 
-## Local storage
+## Cloud analytics storage
 
-Completed local scans are saved on this machine:
+Completed scans are saved to Supabase first:
+
+- Postgres tables: `bagscan_sessions`, `bagscan_images`, `bagscan_extractions`,
+  `bagscan_damage_findings`, `bagscan_validation_events`
+- Private Storage bucket: `bagscan-photos`
+- Raw Gemini analysis is stored as JSONB, while dashboard fields are normalized into typed columns.
+
+The app keeps owner-scoped RLS policies on scan rows and private image objects.
+
+## Local fallback storage
+
+If cloud save fails during rollout, completed scans are saved on this machine:
 
 - SQLite DB: `data/bagscan.sqlite`
 - Photos: `data/bagscan-images/<scan-id>/`
