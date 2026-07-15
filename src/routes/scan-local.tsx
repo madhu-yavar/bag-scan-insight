@@ -1,6 +1,13 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
-import { useMemo, useRef, useState } from "react";
+import {
+  useMemo,
+  useRef,
+  useState,
+  type ComponentProps,
+  type Dispatch,
+  type SetStateAction,
+} from "react";
 import {
   AlertTriangle,
   CheckCircle2,
@@ -38,6 +45,7 @@ import {
   saveLocalScan,
   updateLocalScanApprovals,
   type LocalScanSummary,
+  type TravelContext,
 } from "@/lib/local-scan-store.functions";
 
 export const Route = createFileRoute("/scan-local")({
@@ -59,13 +67,35 @@ export const Route = createFileRoute("/scan-local")({
 
 type ImageMap = Partial<Record<BaggageView, string>>;
 type JsonObject = Record<string, unknown>;
+type TravelContextForm = Record<Exclude<keyof TravelContext, "weight_kg">, string> & {
+  weight_kg: string;
+};
 const MODEL = "gemini-3.5-flash";
 const IDENTITY_MIN_OBSERVABLE_WEIGHT = 45;
 const IDENTITY_ACCEPT_SCORE = 0.82;
 const IDENTITY_STRONG_SCORE = 0.92;
+const EMPTY_TRAVEL_CONTEXT: TravelContextForm = {
+  pnr: "",
+  airline: "",
+  flight_number: "",
+  flight_date: "",
+  departure_airport: "",
+  arrival_airport: "",
+  terminal: "",
+  bag_tag: "",
+  baggage_category: "",
+  weight_kg: "",
+  special_handling: "",
+};
 
 function isCloudSavedScan(scan: CloudScanSummary | LocalScanSummary): scan is CloudScanSummary {
   return "storage" in scan && scan.storage === "cloud";
+}
+
+function notifyScanSaved(scanId: string) {
+  const payload = JSON.stringify({ scanId, savedAt: Date.now() });
+  window.dispatchEvent(new CustomEvent("bagscan:scan-saved", { detail: payload }));
+  localStorage.setItem("bagscan:last-scan-saved", payload);
 }
 
 function LocalScanPage() {
@@ -84,6 +114,7 @@ function LocalScanPage() {
   >({});
   const [name, setName] = useState("");
   const [notes, setNotes] = useState("");
+  const [travelContext, setTravelContext] = useState<TravelContextForm>(EMPTY_TRAVEL_CONTEXT);
   const [analysis, setAnalysis] = useState<unknown>(null);
   const [savedScan, setSavedScan] = useState<CloudScanSummary | LocalScanSummary | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -209,6 +240,7 @@ function LocalScanPage() {
         reference: name,
         notes,
         model: MODEL,
+        travel_context: compactTravelContext(travelContext),
         approved_review_views: approvedViews,
         images: VIEWS.map((view) => ({
           view: view.key,
@@ -220,11 +252,13 @@ function LocalScanPage() {
       try {
         const saved = await saveCloud({ data: savePayload });
         setSavedScan(saved.scan);
+        notifyScanSaved(saved.scan.id);
         toast.success("Scan saved to cloud");
       } catch (cloudSaveError) {
         try {
           const saved = await saveLocal({ data: savePayload });
           setSavedScan(saved.scan);
+          notifyScanSaved(saved.scan.id);
           toast.warning(
             cloudSaveError instanceof Error
               ? `Cloud save failed; saved locally instead: ${cloudSaveError.message}`
@@ -332,6 +366,7 @@ function LocalScanPage() {
       createdAt: new Date().toISOString(),
       name: name.trim() || null,
       notes: notes.trim() || null,
+      travelContext: compactTravelContext(travelContext),
       model: MODEL,
       savedScanId: savedScan?.id ?? null,
       approvedReviewViews: approvedViewList(approvedReviewViews),
@@ -392,6 +427,106 @@ function LocalScanPage() {
                   value={name}
                   onChange={(event) => setName(event.target.value)}
                 />
+              </div>
+              <div className="rounded-2xl border bg-surface-elevated p-4">
+                <div>
+                  <h3 className="text-sm font-semibold">Trip context</h3>
+                  <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                    Add PNR and flight details to power airline, airport, and terminal planning.
+                  </p>
+                </div>
+                <div className="mt-4 grid gap-4 sm:grid-cols-2">
+                  <TextField
+                    id="travel-pnr"
+                    label="PNR"
+                    placeholder="e.g. Y7K9Q2"
+                    value={travelContext.pnr}
+                    onChange={(value) => updateTravelField(setTravelContext, "pnr", value)}
+                  />
+                  <TextField
+                    id="travel-bag-tag"
+                    label="Bag tag"
+                    placeholder="e.g. 0987654321"
+                    value={travelContext.bag_tag}
+                    onChange={(value) => updateTravelField(setTravelContext, "bag_tag", value)}
+                  />
+                  <TextField
+                    id="travel-airline"
+                    label="Airline"
+                    placeholder="e.g. IndiGo"
+                    value={travelContext.airline}
+                    onChange={(value) => updateTravelField(setTravelContext, "airline", value)}
+                  />
+                  <TextField
+                    id="travel-flight"
+                    label="Flight number"
+                    placeholder="e.g. 6E204"
+                    value={travelContext.flight_number}
+                    onChange={(value) =>
+                      updateTravelField(setTravelContext, "flight_number", value)
+                    }
+                  />
+                  <TextField
+                    id="travel-date"
+                    label="Flight date"
+                    type="date"
+                    value={travelContext.flight_date}
+                    onChange={(value) => updateTravelField(setTravelContext, "flight_date", value)}
+                  />
+                  <TextField
+                    id="travel-terminal"
+                    label="Terminal"
+                    placeholder="e.g. T2"
+                    value={travelContext.terminal}
+                    onChange={(value) => updateTravelField(setTravelContext, "terminal", value)}
+                  />
+                  <TextField
+                    id="travel-departure"
+                    label="Departure airport"
+                    placeholder="e.g. BLR"
+                    value={travelContext.departure_airport}
+                    onChange={(value) =>
+                      updateTravelField(setTravelContext, "departure_airport", value)
+                    }
+                  />
+                  <TextField
+                    id="travel-arrival"
+                    label="Arrival airport"
+                    placeholder="e.g. DEL"
+                    value={travelContext.arrival_airport}
+                    onChange={(value) =>
+                      updateTravelField(setTravelContext, "arrival_airport", value)
+                    }
+                  />
+                  <TextField
+                    id="travel-category"
+                    label="Baggage category"
+                    placeholder="Checked-in, cabin, special"
+                    value={travelContext.baggage_category}
+                    onChange={(value) =>
+                      updateTravelField(setTravelContext, "baggage_category", value)
+                    }
+                  />
+                  <TextField
+                    id="travel-weight"
+                    label="Weight kg"
+                    inputMode="decimal"
+                    placeholder="e.g. 18.5"
+                    value={travelContext.weight_kg}
+                    onChange={(value) => updateTravelField(setTravelContext, "weight_kg", value)}
+                  />
+                  <div className="grid gap-1.5 sm:col-span-2">
+                    <Label htmlFor="travel-special-handling">Special handling</Label>
+                    <Textarea
+                      id="travel-special-handling"
+                      placeholder="Fragile, wheelchair support, priority handling, or claim notes"
+                      value={travelContext.special_handling}
+                      onChange={(event) =>
+                        updateTravelField(setTravelContext, "special_handling", event.target.value)
+                      }
+                    />
+                  </div>
+                </div>
               </div>
               <div className="grid gap-1.5">
                 <Label htmlFor="local-notes">Notes</Label>
@@ -483,6 +618,38 @@ function LocalScanPage() {
           </section>
         ) : null}
       </main>
+    </div>
+  );
+}
+
+function TextField({
+  id,
+  label,
+  type = "text",
+  inputMode,
+  placeholder,
+  value,
+  onChange,
+}: {
+  id: string;
+  label: string;
+  type?: string;
+  inputMode?: ComponentProps<"input">["inputMode"];
+  placeholder?: string;
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <div className="grid gap-1.5">
+      <Label htmlFor={id}>{label}</Label>
+      <Input
+        id={id}
+        type={type}
+        inputMode={inputMode}
+        placeholder={placeholder}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+      />
     </div>
   );
 }
@@ -1158,6 +1325,43 @@ function titleCase(value: string) {
   return value
     .replace(/_/g, " ")
     .replace(/\w\S*/g, (word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase());
+}
+
+function updateTravelField(
+  setTravelContext: Dispatch<SetStateAction<TravelContextForm>>,
+  field: keyof TravelContextForm,
+  value: string,
+) {
+  setTravelContext((current) => ({ ...current, [field]: value }));
+}
+
+function compactTravelContext(form: TravelContextForm): TravelContext | null {
+  const context: TravelContext = {
+    pnr: textOrNull(form.pnr),
+    airline: textOrNull(form.airline),
+    flight_number: textOrNull(form.flight_number),
+    flight_date: textOrNull(form.flight_date),
+    departure_airport: textOrNull(form.departure_airport),
+    arrival_airport: textOrNull(form.arrival_airport),
+    terminal: textOrNull(form.terminal),
+    bag_tag: textOrNull(form.bag_tag),
+    baggage_category: textOrNull(form.baggage_category),
+    weight_kg: positiveNumberOrNull(form.weight_kg),
+    special_handling: textOrNull(form.special_handling),
+  };
+  return Object.values(context).some((value) => value != null) ? context : null;
+}
+
+function textOrNull(value: string) {
+  const trimmed = value.trim();
+  return trimmed ? trimmed : null;
+}
+
+function positiveNumberOrNull(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  const parsed = Number(trimmed);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
 }
 
 function slugify(value: string) {

@@ -1,5 +1,5 @@
 import type { BaggageView } from "@/lib/baggage-views";
-import type { ManualDimensionsCm } from "./local-scan-store.types";
+import type { ManualDimensionsCm, TravelContext } from "./local-scan-store.types";
 
 export type CloudScanImageInput = {
   view: BaggageView;
@@ -10,6 +10,7 @@ export type SaveCloudScanData = {
   reference?: string;
   notes?: string;
   model: string;
+  travel_context?: TravelContext | null;
   manual_dimensions_cm?: ManualDimensionsCm | null;
   approved_review_views: BaggageView[];
   images: CloudScanImageInput[];
@@ -24,6 +25,7 @@ export type CloudScanSummary = {
   status: string;
   createdAt: string;
   updatedAt: string;
+  travelContext: TravelContext | null;
   manualDimensionsCm: ManualDimensionsCm | null;
   approvedReviewViews: string[];
   captureValidationStatus: string | null;
@@ -79,9 +81,14 @@ export type CloudScanDetail = CloudScanSummary & {
   validationEvents: CloudValidationEvent[];
 };
 
+export type AnalyticsScanSummary = Omit<CloudScanSummary, "storage"> & {
+  storage: "cloud" | "local";
+};
+
 export type CloudAnalytics = {
   totals: {
     scans: number;
+    photos: number;
     completed: number;
     needsReview: number;
     failed: number;
@@ -90,6 +97,52 @@ export type CloudAnalytics = {
     avgIdentityScore: number | null;
     avgVolumeLiters: number | null;
   };
+  sources: {
+    cloudScans: number;
+    localScans: number;
+    cloudPhotos: number;
+    localPhotos: number;
+  };
+  operational: {
+    dimensionReadyScans: number;
+    oversizeCandidates: number;
+    highVolumeCandidates: number;
+    avgLinearCm: number | null;
+    reviewRate: number | null;
+    damageRate: number | null;
+    planningReadiness: number | null;
+  };
+  travel: {
+    pnrLinkedScans: number;
+    uniquePnrs: number;
+    uniqueFlights: number;
+    uniqueAirlines: number;
+    weightedScans: number;
+    totalWeightKg: number | null;
+    avgWeightKg: number | null;
+    pnrReadiness: number | null;
+  };
+  flightLoads: Array<{
+    label: string;
+    count: number;
+    totalWeightKg: number | null;
+    oversizeCount: number;
+    highVolumeCount: number;
+  }>;
+  terminalLoads: Array<{
+    label: string;
+    count: number;
+    totalWeightKg: number | null;
+    oversizeCount: number;
+    highVolumeCount: number;
+  }>;
+  pnrGroups: Array<{
+    label: string;
+    count: number;
+    totalWeightKg: number | null;
+    oversizeCount: number;
+    highVolumeCount: number;
+  }>;
   bagTypes: Array<{ label: string; count: number }>;
   sizeClasses: Array<{ label: string; count: number }>;
   conditions: Array<{ label: string; count: number }>;
@@ -102,5 +155,5 @@ export type CloudAnalytics = {
     avgIdentityScore: number | null;
     rejectedCount: number;
   }>;
-  recentScans: CloudScanSummary[];
+  recentScans: AnalyticsScanSummary[];
 };

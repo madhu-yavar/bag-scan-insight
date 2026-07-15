@@ -1,10 +1,12 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import type { BaggageView } from "@/lib/baggage-views";
 import { VIEWS } from "@/lib/baggage-views";
+import { getScan as getLocalScan, listScans as listLocalScans } from "./local-scan-store.server";
 import { normalizeScanAnalysis } from "./analysis-normalizer";
 import type {
+  AnalyticsScanSummary,
   CloudAnalytics,
   CloudDamageFinding,
   CloudScanDetail,
@@ -13,12 +15,16 @@ import type {
   CloudValidationEvent,
   SaveCloudScanData,
 } from "./cloud-scan-store.types";
-import type { ManualDimensionsCm } from "./local-scan-store.types";
+import type { LocalScanDetail, ManualDimensionsCm, TravelContext } from "./local-scan-store.types";
 
 const PHOTO_BUCKET = "bagscan-photos";
 const SIGNED_URL_SECONDS = 60 * 60;
 
 type Row = Record<string, unknown>;
+const SESSION_SELECT =
+  "id,user_id,reference,notes,pnr,airline,flight_number,flight_date,departure_airport,arrival_airport,terminal,bag_tag,baggage_category,weight_kg,special_handling,status,model,manual_dimensions_json,approved_review_views,capture_validation_status,created_at,updated_at";
+const ANALYTICS_SESSION_SELECT =
+  "id,status,pnr,airline,flight_number,flight_date,departure_airport,arrival_airport,terminal,bag_tag,baggage_category,weight_kg,special_handling,created_at";
 
 export async function saveCloudScan(
   supabase: SupabaseClient,
@@ -62,11 +68,24 @@ export async function saveCloudScan(
 
     const status =
       normalized.captureValidationStatus === "needs_review" ? "needs_review" : "completed";
+    const travel = normalizeTravelContext(data.travel_context);
     const sessionInsert = await supabase.from("bagscan_sessions").insert({
       id: scanId,
       user_id: userId,
       reference: normalizeText(data.reference),
       notes: normalizeText(data.notes),
+      pnr: travel?.pnr ?? null,
+      pnr_hash: travel?.pnr ? hashPnr(travel.pnr) : null,
+      airline: travel?.airline ?? null,
+      flight_number: travel?.flight_number ?? null,
+      flight_date: travel?.flight_date ?? null,
+      departure_airport: travel?.departure_airport ?? null,
+      arrival_airport: travel?.arrival_airport ?? null,
+      terminal: travel?.terminal ?? null,
+      bag_tag: travel?.bag_tag ?? null,
+      baggage_category: travel?.baggage_category ?? null,
+      weight_kg: travel?.weight_kg ?? null,
+      special_handling: travel?.special_handling ?? null,
       status,
       model: data.model,
       analysis_version: "local-gemini-v1",
@@ -169,9 +188,7 @@ export async function listCloudScans(
 ): Promise<CloudScanSummary[]> {
   const sessionsResult = await supabase
     .from("bagscan_sessions")
-    .select(
-      "id,user_id,reference,notes,status,model,manual_dimensions_json,approved_review_views,capture_validation_status,created_at,updated_at",
-    )
+    .select(SESSION_SELECT)
     .eq("user_id", userId)
     .order("created_at", { ascending: false })
     .limit(limit);
@@ -202,9 +219,7 @@ export async function getCloudScan(
 ): Promise<CloudScanDetail> {
   const sessionResult = await supabase
     .from("bagscan_sessions")
-    .select(
-      "id,user_id,reference,notes,status,model,manual_dimensions_json,approved_review_views,capture_validation_status,created_at,updated_at",
-    )
+    .select(SESSION_SELECT)
     .eq("id", id)
     .eq("user_id", userId)
     .maybeSingle();
@@ -257,11 +272,15 @@ export async function getCloudAnalytics(
 ): Promise<CloudAnalytics> {
   const [sessionsResult, extractionsResult, imagesResult, damageResult, recentScans] =
     await Promise.all([
-      supabase.from("bagscan_sessions").select("id,status").eq("user_id", userId).limit(5000),
+      supabase
+        .from("bagscan_sessions")
+        .select(ANALYTICS_SESSION_SELECT)
+        .eq("user_id", userId)
+        .limit(5000),
       supabase
         .from("bagscan_extractions")
         .select(
-          "scan_id,bag_type,size_class,material,overall_condition,quality_score,identity_score,volume_liters",
+          "scan_id,bag_type,size_class,material,overall_condition,width_cm,height_cm,depth_cm,quality_score,identity_score,volume_liters",
         )
         .eq("user_id", userId)
         .limit(5000),
@@ -291,25 +310,78 @@ export async function getCloudAnalytics(
   const extractions = rows(extractionsResult.data);
   const images = rows(imagesResult.data);
   const damages = rows(damageResult.data);
+  const cloudIds = new Set(sessions.map((row) => stringField(row, "id")).filter(Boolean));
+  const localRows = loadLocalAnalyticsRows(userId, cloudIds);
+  const allSessions = [...sessions, ...localRows.sessions];
+  const allExtractions = [...extractions, ...localRows.extractions];
+  const allImages = [...images, ...localRows.images];
+  const allDamages = [...damages, ...localRows.damages];
+  const allRecentScans = [...recentScans, ...localRows.recentScans]
+    .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))
+    .slice(0, 10);
+  const extractionByScan = new Map(allExtractions.map((row) => [stringField(row, "scan_id"), row]));
+  const travelRows = travelAnalyticsRows(allSessions, extractionByScan);
+  const weightedRows = travelRows.filter((row) => row.weightKg != null);
+  const dimensionRows = allExtractions.filter((row) => linearCm(row) != null);
+  const oversizeCandidates = dimensionRows.filter((row) => (linearCm(row) ?? 0) > 158).length;
+  const highVolumeCandidates = allExtractions.filter(
+    (row) => (numberField(row, "volume_liters") ?? 0) >= 90,
+  ).length;
 
   return {
     totals: {
-      scans: sessions.length,
-      completed: sessions.filter((row) => stringField(row, "status") === "completed").length,
-      needsReview: sessions.filter((row) => stringField(row, "status") === "needs_review").length,
-      failed: sessions.filter((row) => stringField(row, "status") === "failed").length,
-      damages: damages.length,
-      avgQualityScore: average(extractions.map((row) => numberField(row, "quality_score"))),
-      avgIdentityScore: average(extractions.map((row) => numberField(row, "identity_score"))),
-      avgVolumeLiters: average(extractions.map((row) => numberField(row, "volume_liters"))),
+      scans: allSessions.length,
+      photos: allImages.length,
+      completed: allSessions.filter((row) => stringField(row, "status") === "completed").length,
+      needsReview: allSessions.filter((row) => stringField(row, "status") === "needs_review")
+        .length,
+      failed: allSessions.filter((row) => stringField(row, "status") === "failed").length,
+      damages: allDamages.length,
+      avgQualityScore: average(allExtractions.map((row) => numberField(row, "quality_score"))),
+      avgIdentityScore: average(allExtractions.map((row) => numberField(row, "identity_score"))),
+      avgVolumeLiters: average(allExtractions.map((row) => numberField(row, "volume_liters"))),
     },
-    bagTypes: distribution(extractions, "bag_type"),
-    sizeClasses: distribution(extractions, "size_class"),
-    conditions: distribution(extractions, "overall_condition"),
-    materials: distribution(extractions, "material"),
-    damageSeverity: distribution(damages, "severity"),
+    sources: {
+      cloudScans: sessions.length,
+      localScans: localRows.sessions.length,
+      cloudPhotos: images.length,
+      localPhotos: localRows.images.length,
+    },
+    operational: {
+      dimensionReadyScans: dimensionRows.length,
+      oversizeCandidates,
+      highVolumeCandidates,
+      avgLinearCm: average(dimensionRows.map(linearCm)),
+      reviewRate: ratio(
+        allSessions.filter((row) => stringField(row, "status") === "needs_review").length,
+        allSessions.length,
+      ),
+      damageRate: ratio(allDamages.length, allSessions.length),
+      planningReadiness: ratio(dimensionRows.length, allSessions.length),
+    },
+    travel: {
+      pnrLinkedScans: travelRows.filter((row) => row.pnr).length,
+      uniquePnrs: uniqueCount(travelRows.map((row) => row.pnr)),
+      uniqueFlights: uniqueCount(travelRows.map(flightIdentity)),
+      uniqueAirlines: uniqueCount(travelRows.map((row) => row.airline)),
+      weightedScans: weightedRows.length,
+      totalWeightKg: sumNullable(weightedRows.map((row) => row.weightKg)),
+      avgWeightKg: average(weightedRows.map((row) => row.weightKg)),
+      pnrReadiness: ratio(
+        travelRows.filter((row) => row.pnr && row.flightNumber && row.weightKg != null).length,
+        allSessions.length,
+      ),
+    },
+    flightLoads: groupedTravelLoads(travelRows, flightLabel),
+    terminalLoads: groupedTravelLoads(travelRows, terminalLabel),
+    pnrGroups: groupedTravelLoads(travelRows, pnrLabel),
+    bagTypes: distribution(allExtractions, "bag_type"),
+    sizeClasses: distribution(allExtractions, "size_class"),
+    conditions: distribution(allExtractions, "overall_condition"),
+    materials: distribution(allExtractions, "material"),
+    damageSeverity: distribution(allDamages, "severity"),
     viewQuality: VIEWS.map((view) => {
-      const viewRows = images.filter((row) => stringField(row, "view") === view.key);
+      const viewRows = allImages.filter((row) => stringField(row, "view") === view.key);
       return {
         view: view.key,
         imageCount: viewRows.length,
@@ -320,8 +392,167 @@ export async function getCloudAnalytics(
         ).length,
       };
     }),
-    recentScans,
+    recentScans: allRecentScans,
   };
+}
+
+type AnalyticsRows = {
+  sessions: Row[];
+  extractions: Row[];
+  images: Row[];
+  damages: Row[];
+  recentScans: AnalyticsScanSummary[];
+};
+
+type TravelAnalyticsRow = {
+  id: string;
+  pnr: string | null;
+  airline: string | null;
+  flightNumber: string | null;
+  flightDate: string | null;
+  departureAirport: string | null;
+  arrivalAirport: string | null;
+  terminal: string | null;
+  bagTag: string | null;
+  baggageCategory: string | null;
+  weightKg: number | null;
+  linearCm: number | null;
+  volumeLiters: number | null;
+};
+
+function loadLocalAnalyticsRows(userId: string, existingIds: Set<string>): AnalyticsRows {
+  try {
+    const summaries = listLocalScans(userId, 500).filter((scan) => !existingIds.has(scan.id));
+    const details = summaries
+      .map((summary) => safeLocalDetail(userId, summary.id))
+      .filter((detail): detail is LocalScanDetail => Boolean(detail));
+
+    return {
+      sessions: details.map(localSessionRow),
+      extractions: details.map(localExtractionRow),
+      images: details.flatMap(localImageRows),
+      damages: details.flatMap(localDamageRows),
+      recentScans: details
+        .map(localScanToAnalyticsSummary)
+        .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))
+        .slice(0, 10),
+    };
+  } catch {
+    return {
+      sessions: [],
+      extractions: [],
+      images: [],
+      damages: [],
+      recentScans: [],
+    };
+  }
+}
+
+function safeLocalDetail(userId: string, id: string) {
+  try {
+    return getLocalScan(userId, id);
+  } catch {
+    return null;
+  }
+}
+
+function localSessionRow(detail: LocalScanDetail): Row {
+  return {
+    id: detail.id,
+    status: localStatus(detail),
+    created_at: detail.createdAt,
+    pnr: detail.travelContext?.pnr ?? null,
+    airline: detail.travelContext?.airline ?? null,
+    flight_number: detail.travelContext?.flight_number ?? null,
+    flight_date: detail.travelContext?.flight_date ?? null,
+    departure_airport: detail.travelContext?.departure_airport ?? null,
+    arrival_airport: detail.travelContext?.arrival_airport ?? null,
+    terminal: detail.travelContext?.terminal ?? null,
+    bag_tag: detail.travelContext?.bag_tag ?? null,
+    baggage_category: detail.travelContext?.baggage_category ?? null,
+    weight_kg: detail.travelContext?.weight_kg ?? null,
+    special_handling: detail.travelContext?.special_handling ?? null,
+  };
+}
+
+function localExtractionRow(detail: LocalScanDetail): Row {
+  const normalized = normalizeScanAnalysis(detail.analysis);
+  const dimensions = detail.manualDimensionsCm;
+  const width = dimensions?.width ?? normalized.widthCm;
+  const height = dimensions?.height ?? normalized.heightCm;
+  const depth = dimensions?.depth ?? normalized.depthCm;
+
+  return {
+    scan_id: detail.id,
+    bag_type: detail.bagType ?? normalized.bagType,
+    size_class: normalized.sizeClass,
+    material: normalized.material,
+    overall_condition: detail.overallCondition ?? normalized.overallCondition,
+    width_cm: width,
+    height_cm: height,
+    depth_cm: depth,
+    quality_score: normalized.qualityScore,
+    identity_score: normalized.identityScore,
+    volume_liters: volumeLiters(width, height, depth),
+  };
+}
+
+function localImageRows(detail: LocalScanDetail): Row[] {
+  const normalized = normalizeScanAnalysis(detail.analysis);
+  return detail.images.map((image) => {
+    const metrics = normalized.imageMetrics[image.view];
+    return {
+      scan_id: detail.id,
+      view: image.view,
+      quality_score: metrics.qualityScore,
+      identity_score: metrics.identityScore,
+      view_validation_status: metrics.viewValidationStatus,
+    };
+  });
+}
+
+function localDamageRows(detail: LocalScanDetail): Row[] {
+  const normalized = normalizeScanAnalysis(detail.analysis);
+  return normalized.damageFindings.map((finding) => ({
+    scan_id: detail.id,
+    severity: finding.severity,
+  }));
+}
+
+function localScanToAnalyticsSummary(detail: LocalScanDetail): AnalyticsScanSummary {
+  const extraction = localExtractionRow(detail);
+  return {
+    id: detail.id,
+    reference: detail.reference,
+    notes: detail.notes,
+    model: detail.model,
+    status: localStatus(detail),
+    createdAt: detail.createdAt,
+    updatedAt: detail.updatedAt,
+    travelContext: detail.travelContext,
+    manualDimensionsCm: detail.manualDimensionsCm,
+    approvedReviewViews: detail.approvedReviewViews,
+    captureValidationStatus: detail.captureValidationStatus,
+    summary: detail.summary,
+    bagType: stringOrNull(extraction.bag_type),
+    sizeClass: stringOrNull(extraction.size_class),
+    overallCondition: stringOrNull(extraction.overall_condition),
+    widthCm: numberField(extraction, "width_cm"),
+    heightCm: numberField(extraction, "height_cm"),
+    depthCm: numberField(extraction, "depth_cm"),
+    volumeLiters: numberField(extraction, "volume_liters"),
+    qualityScore: numberField(extraction, "quality_score"),
+    identityScore: numberField(extraction, "identity_score"),
+    imageCount: detail.imageCount,
+    storage: "local",
+  };
+}
+
+function localStatus(detail: LocalScanDetail) {
+  return detail.captureValidationStatus === "needs_review" ||
+    detail.captureValidationStatus === "needs_retake"
+    ? "needs_review"
+    : detail.status;
 }
 
 function cloudDetailToSummary(detail: CloudScanDetail): CloudScanSummary {
@@ -410,6 +641,7 @@ function rowsToSummary(
     status: stringField(session, "status"),
     createdAt: stringField(session, "created_at"),
     updatedAt: stringField(session, "updated_at"),
+    travelContext: rowToTravelContext(session),
     manualDimensionsCm: dimensions,
     approvedReviewViews: parseStringArray(session.approved_review_views),
     captureValidationStatus:
@@ -490,6 +722,105 @@ function distribution(rowsToCount: Row[], key: string) {
     .slice(0, 12);
 }
 
+function travelAnalyticsRows(
+  sessions: Row[],
+  extractionByScan: Map<string, Row>,
+): TravelAnalyticsRow[] {
+  return sessions.map((session) => {
+    const id = stringField(session, "id");
+    const extraction = extractionByScan.get(id);
+    return {
+      id,
+      pnr: stringOrNull(session.pnr),
+      airline: stringOrNull(session.airline),
+      flightNumber: stringOrNull(session.flight_number),
+      flightDate: stringOrNull(session.flight_date),
+      departureAirport: stringOrNull(session.departure_airport),
+      arrivalAirport: stringOrNull(session.arrival_airport),
+      terminal: stringOrNull(session.terminal),
+      bagTag: stringOrNull(session.bag_tag),
+      baggageCategory: stringOrNull(session.baggage_category),
+      weightKg: numberField(session, "weight_kg"),
+      linearCm: extraction ? linearCm(extraction) : null,
+      volumeLiters: extraction ? numberField(extraction, "volume_liters") : null,
+    };
+  });
+}
+
+function groupedTravelLoads(
+  rowsToGroup: TravelAnalyticsRow[],
+  getLabel: (row: TravelAnalyticsRow) => string | null,
+) {
+  const groups = new Map<
+    string,
+    {
+      label: string;
+      count: number;
+      totalWeightKg: number;
+      weightCount: number;
+      oversizeCount: number;
+      highVolumeCount: number;
+    }
+  >();
+
+  for (const row of rowsToGroup) {
+    const label = getLabel(row);
+    if (!label) continue;
+    const group = groups.get(label) ?? {
+      label,
+      count: 0,
+      totalWeightKg: 0,
+      weightCount: 0,
+      oversizeCount: 0,
+      highVolumeCount: 0,
+    };
+    group.count += 1;
+    if (row.weightKg != null) {
+      group.totalWeightKg += row.weightKg;
+      group.weightCount += 1;
+    }
+    if ((row.linearCm ?? 0) > 158) group.oversizeCount += 1;
+    if ((row.volumeLiters ?? 0) >= 90) group.highVolumeCount += 1;
+    groups.set(label, group);
+  }
+
+  return [...groups.values()]
+    .map((group) => ({
+      label: group.label,
+      count: group.count,
+      totalWeightKg: group.weightCount > 0 ? Math.round(group.totalWeightKg * 10) / 10 : null,
+      oversizeCount: group.oversizeCount,
+      highVolumeCount: group.highVolumeCount,
+    }))
+    .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label))
+    .slice(0, 8);
+}
+
+function flightLabel(row: TravelAnalyticsRow) {
+  if (!row.flightNumber && !row.airline) return null;
+  const flight = [row.airline, row.flightNumber].filter(Boolean).join(" ");
+  const route = [row.departureAirport, row.arrivalAirport].filter(Boolean).join("-");
+  return [flight || "Unknown flight", row.flightDate, route].filter(Boolean).join(" · ");
+}
+
+function terminalLabel(row: TravelAnalyticsRow) {
+  if (!row.departureAirport && !row.terminal) return null;
+  return [row.departureAirport || "Unknown airport", row.terminal || "Terminal n/a"].join(" · ");
+}
+
+function pnrLabel(row: TravelAnalyticsRow) {
+  if (!row.pnr) return null;
+  const flight = [row.airline, row.flightNumber].filter(Boolean).join(" ");
+  return [row.pnr, flight].filter(Boolean).join(" · ");
+}
+
+function flightIdentity(row: TravelAnalyticsRow) {
+  if (!row.flightNumber && !row.airline) return null;
+  return [row.airline, row.flightNumber, row.flightDate, row.departureAirport, row.arrivalAirport]
+    .filter(Boolean)
+    .join("|");
+}
+
 function parseDataObject(value: unknown): Row | null {
   if (typeof value === "string") {
     try {
@@ -526,6 +857,49 @@ function safeJson(value: string) {
 function normalizeText(value: string | undefined) {
   const trimmed = value?.trim();
   return trimmed ? trimmed : null;
+}
+
+function normalizeUpperText(value: string | null | undefined) {
+  const trimmed = normalizeText(value ?? undefined);
+  return trimmed ? trimmed.toUpperCase() : null;
+}
+
+function normalizeTravelContext(value: TravelContext | null | undefined): TravelContext | null {
+  if (!value) return null;
+  const travel = {
+    pnr: normalizeUpperText(value.pnr),
+    airline: normalizeText(value.airline ?? undefined),
+    flight_number: normalizeUpperText(value.flight_number),
+    flight_date: normalizeText(value.flight_date ?? undefined),
+    departure_airport: normalizeUpperText(value.departure_airport),
+    arrival_airport: normalizeUpperText(value.arrival_airport),
+    terminal: normalizeText(value.terminal ?? undefined),
+    bag_tag: normalizeUpperText(value.bag_tag),
+    baggage_category: normalizeText(value.baggage_category ?? undefined),
+    weight_kg: positiveNumber(value.weight_kg),
+    special_handling: normalizeText(value.special_handling ?? undefined),
+  };
+  return Object.values(travel).some((item) => item != null) ? travel : null;
+}
+
+function rowToTravelContext(row: Row): TravelContext | null {
+  return normalizeTravelContext({
+    pnr: stringOrNull(row.pnr),
+    airline: stringOrNull(row.airline),
+    flight_number: stringOrNull(row.flight_number),
+    flight_date: stringOrNull(row.flight_date),
+    departure_airport: stringOrNull(row.departure_airport),
+    arrival_airport: stringOrNull(row.arrival_airport),
+    terminal: stringOrNull(row.terminal),
+    bag_tag: stringOrNull(row.bag_tag),
+    baggage_category: stringOrNull(row.baggage_category),
+    weight_kg: numberField(row, "weight_kg"),
+    special_handling: stringOrNull(row.special_handling),
+  });
+}
+
+function hashPnr(pnr: string) {
+  return createHash("sha256").update(pnr).digest("hex");
 }
 
 function normalizeView(value: unknown): BaggageView | null {
@@ -566,10 +940,37 @@ function positiveNumber(value: unknown) {
   return number != null && number > 0 ? number : null;
 }
 
+function linearCm(row: Row) {
+  const width = numberField(row, "width_cm");
+  const height = numberField(row, "height_cm");
+  const depth = numberField(row, "depth_cm");
+  if (width == null || height == null || depth == null) return null;
+  return width + height + depth;
+}
+
+function volumeLiters(width: number | null, height: number | null, depth: number | null) {
+  if (width == null || height == null || depth == null) return null;
+  return Math.round((width * height * depth) / 10) / 100;
+}
+
+function ratio(value: number, total: number) {
+  return total > 0 ? value / total : null;
+}
+
+function sumNullable(values: Array<number | null>) {
+  const numbers = values.filter((value): value is number => value != null);
+  if (numbers.length === 0) return null;
+  return Math.round(numbers.reduce((sum, value) => sum + value, 0) * 10) / 10;
+}
+
 function average(values: Array<number | null>) {
   const numbers = values.filter((value): value is number => value != null);
   if (numbers.length === 0) return null;
   return numbers.reduce((sum, value) => sum + value, 0) / numbers.length;
+}
+
+function uniqueCount(values: Array<string | null>) {
+  return new Set(values.filter((value): value is string => Boolean(value))).size;
 }
 
 function isRow(value: unknown): value is Row {

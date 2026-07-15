@@ -8,6 +8,7 @@ export type {
   LocalScanSummary,
   ManualDimensionsCm,
   SaveLocalScanData,
+  TravelContext,
 } from "./local-scan-store.types";
 
 const ViewSchema = z.enum(["front", "back", "top", "side"]);
@@ -15,6 +16,20 @@ const ManualDimensionsSchema = z.object({
   width: z.number().positive(),
   height: z.number().positive(),
   depth: z.number().positive(),
+});
+
+const TravelContextSchema = z.object({
+  pnr: z.string().optional().nullable(),
+  airline: z.string().optional().nullable(),
+  flight_number: z.string().optional().nullable(),
+  flight_date: z.string().optional().nullable(),
+  departure_airport: z.string().optional().nullable(),
+  arrival_airport: z.string().optional().nullable(),
+  terminal: z.string().optional().nullable(),
+  bag_tag: z.string().optional().nullable(),
+  baggage_category: z.string().optional().nullable(),
+  weight_kg: z.number().positive().optional().nullable(),
+  special_handling: z.string().optional().nullable(),
 });
 
 const ImageInput = z.object({
@@ -26,6 +41,7 @@ const SaveScanInput = z.object({
   reference: z.string().optional(),
   notes: z.string().optional(),
   model: z.string().min(1),
+  travel_context: TravelContextSchema.optional().nullable(),
   manual_dimensions_cm: ManualDimensionsSchema.nullish(),
   approved_review_views: z.array(ViewSchema).default([]),
   images: z.array(ImageInput).length(4),

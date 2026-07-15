@@ -2,7 +2,7 @@
 
 Status: reviewed and implemented for initial cloud storage/dashboard release  
 Created: 2026-07-15  
-Scope: persist BagScan photos, Gemini JSON extractions, normalized analytics fields, and dashboard-ready metrics.
+Scope: persist BagScan photos, Gemini JSON extractions, normalized analytics fields, PNR/travel context, and dashboard-ready metrics.
 
 ## 1. Decision Summary
 
@@ -45,6 +45,8 @@ Implemented cloud path:
 
 - Supabase Storage bucket: `bagscan-photos`
 - Supabase Postgres tables: `bagscan_sessions`, `bagscan_images`, `bagscan_extractions`, `bagscan_damage_findings`, and `bagscan_validation_events`
+- Travel context columns on `bagscan_sessions`: PNR, PNR hash, airline, flight number/date,
+  departure/arrival airport, terminal, bag tag, baggage category, manual weight, and special handling.
 - Dashboard route: `/dashboard`
 - Report routes: `/reports-local` and `/reports-local/$id` read cloud data first, then local fallback
 
@@ -55,6 +57,8 @@ Implemented cloud path:
 3. Persist raw Gemini JSON exactly as returned.
 4. Persist normalized fields for analytics:
    - dimensions
+   - PNR and flight context
+   - airline, airport, terminal, bag tag, and manual weight
    - baggage type
    - material
    - colors
@@ -423,19 +427,44 @@ Future route options:
 - `/dashboard/scans/$id`
 - `/dashboard/quality`
 
+Implemented dashboard V1 reads Supabase cloud analytics and VM-local historic reports, then merges
+the metrics for the signed-in user. This keeps old reports visible while backfill is deferred.
+
+The visible dashboard is separated by business user so each audience sees a different decision
+surface:
+
+- Airline / Airport: PNR-linked bags, flight groups, terminal pressure, captured weight, dimension
+  coverage, oversize candidates, high-volume bags, and planning prescriptions.
+- Insurance: damage findings, evidence quality, review rate, condition at scan, damage severity,
+  and claims prescriptions.
+- Manufacturer: baggage type mix, material mix, condition trends, and damage severity for product
+  design/manufacturing prescriptions.
+- Customer Service: completed scans, review queue, capture quality, PNR-linked customer cases, and
+  service prescriptions.
+
 Implemented dashboard V1 widgets:
 
 - total scans
 - needs-review scans
 - damage findings
 - average volume
+- PNR-linked scan count
+- unique PNR, airline, and flight counts
+- captured total/manual baggage weight
+- flight-level baggage load grouping
+- terminal pressure grouping
+- PNR grouping for customer journey support
+- oversize candidates based on linear dimensions
+- predictive planning readiness based on PNR, flight, and manual weight coverage
 - baggage type distribution
 - size class distribution
 - material distribution
 - condition distribution
 - retake rate by view
 - capture quality by view
-- recent cloud scans
+- recent scans
+- separate role tabs for airline/airport operations, insurance, manufacturing, and customer service
+- rule-based prescription panels for operations, insurance, manufacturing, and customer service
 
 Later dashboard widgets:
 
@@ -448,6 +477,9 @@ Later dashboard widgets:
 - validation failure reasons
 - same-baggage mismatch rate
 - low-confidence extraction queue
+- richer route/flight-level baggage load forecasting
+- oversize and overweight handling prediction using larger historical samples
+- claim risk and evidence completeness scoring
 
 Scan detail page:
 

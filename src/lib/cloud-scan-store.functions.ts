@@ -19,6 +19,20 @@ const ManualDimensionsSchema = z.object({
   depth: z.number().positive(),
 });
 
+const TravelContextSchema = z.object({
+  pnr: z.string().optional().nullable(),
+  airline: z.string().optional().nullable(),
+  flight_number: z.string().optional().nullable(),
+  flight_date: z.string().optional().nullable(),
+  departure_airport: z.string().optional().nullable(),
+  arrival_airport: z.string().optional().nullable(),
+  terminal: z.string().optional().nullable(),
+  bag_tag: z.string().optional().nullable(),
+  baggage_category: z.string().optional().nullable(),
+  weight_kg: z.number().positive().optional().nullable(),
+  special_handling: z.string().optional().nullable(),
+});
+
 const ImageInput = z.object({
   view: ViewSchema,
   data_url: z.string().startsWith("data:image/"),
@@ -28,6 +42,7 @@ const SaveCloudScanInput = z.object({
   reference: z.string().optional(),
   notes: z.string().optional(),
   model: z.string().min(1),
+  travel_context: TravelContextSchema.optional().nullable(),
   manual_dimensions_cm: ManualDimensionsSchema.nullish(),
   approved_review_views: z.array(ViewSchema).default([]),
   images: z.array(ImageInput).length(4),
@@ -73,7 +88,7 @@ export const getCloudScan = createServerFn({ method: "GET" })
     return { scan: await get(context.supabase, context.userId, data.id) };
   });
 
-export const getCloudAnalytics = createServerFn({ method: "GET" })
+export const getCloudAnalytics = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
     const { getCloudAnalytics: getAnalytics } = await import("./cloud-scan-store.server");

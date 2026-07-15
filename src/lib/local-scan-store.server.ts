@@ -9,6 +9,7 @@ import type {
   LocalScanSummary,
   ManualDimensionsCm,
   SaveLocalScanData,
+  TravelContext,
 } from "./local-scan-store.types";
 
 const DATA_DIR = resolve(process.cwd(), "data");
@@ -24,6 +25,17 @@ type ScanRow = {
   status: string;
   created_at: string;
   updated_at: string;
+  pnr: string | null;
+  airline: string | null;
+  flight_number: string | null;
+  flight_date: string | null;
+  departure_airport: string | null;
+  arrival_airport: string | null;
+  terminal: string | null;
+  bag_tag: string | null;
+  baggage_category: string | null;
+  weight_kg: number | null;
+  special_handling: string | null;
   manual_dimensions_json: string | null;
   approved_review_views: string;
   analysis_json: string;
@@ -72,13 +84,16 @@ export function saveScan(userId: string, data: SaveLocalScanData): LocalScanSumm
   const database = getDb();
   database.exec("BEGIN IMMEDIATE");
   try {
+    const travel = normalizeTravelContext(data.travel_context);
     database
       .prepare(
         `INSERT INTO scans (
           id, user_id, reference, notes, model, status, created_at, updated_at,
-          manual_dimensions_json, approved_review_views, analysis_json, capture_validation_status,
+          pnr, airline, flight_number, flight_date, departure_airport, arrival_airport, terminal,
+          bag_tag, baggage_category, weight_kg, special_handling, manual_dimensions_json,
+          approved_review_views, analysis_json, capture_validation_status,
           summary, bag_type, overall_condition
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         id,
@@ -89,6 +104,17 @@ export function saveScan(userId: string, data: SaveLocalScanData): LocalScanSumm
         "completed",
         now,
         now,
+        travel?.pnr ?? null,
+        travel?.airline ?? null,
+        travel?.flight_number ?? null,
+        travel?.flight_date ?? null,
+        travel?.departure_airport ?? null,
+        travel?.arrival_airport ?? null,
+        travel?.terminal ?? null,
+        travel?.bag_tag ?? null,
+        travel?.baggage_category ?? null,
+        travel?.weight_kg ?? null,
+        travel?.special_handling ?? null,
         data.manual_dimensions_cm ? JSON.stringify(data.manual_dimensions_cm) : null,
         JSON.stringify(data.approved_review_views),
         JSON.stringify(data.analysis),
@@ -198,6 +224,7 @@ function scanRowToSummary(row: ScanRow): LocalScanSummary {
     status: row.status,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    travelContext: rowToTravelContext(row),
     manualDimensionsCm: parseManualDimensions(row.manual_dimensions_json),
     approvedReviewViews: parseJson<string[]>(row.approved_review_views, []),
     captureValidationStatus: row.capture_validation_status,
@@ -226,6 +253,17 @@ function getDb() {
       status TEXT NOT NULL,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
+      pnr TEXT,
+      airline TEXT,
+      flight_number TEXT,
+      flight_date TEXT,
+      departure_airport TEXT,
+      arrival_airport TEXT,
+      terminal TEXT,
+      bag_tag TEXT,
+      baggage_category TEXT,
+      weight_kg REAL,
+      special_handling TEXT,
       manual_dimensions_json TEXT,
       approved_review_views TEXT NOT NULL DEFAULT '[]',
       analysis_json TEXT NOT NULL,
@@ -249,10 +287,23 @@ function getDb() {
     CREATE INDEX IF NOT EXISTS idx_scan_images_scan_id ON scan_images(scan_id);
   `);
   ensureColumn(db, "scans", "user_id", "TEXT");
+  ensureColumn(db, "scans", "pnr", "TEXT");
+  ensureColumn(db, "scans", "airline", "TEXT");
+  ensureColumn(db, "scans", "flight_number", "TEXT");
+  ensureColumn(db, "scans", "flight_date", "TEXT");
+  ensureColumn(db, "scans", "departure_airport", "TEXT");
+  ensureColumn(db, "scans", "arrival_airport", "TEXT");
+  ensureColumn(db, "scans", "terminal", "TEXT");
+  ensureColumn(db, "scans", "bag_tag", "TEXT");
+  ensureColumn(db, "scans", "baggage_category", "TEXT");
+  ensureColumn(db, "scans", "weight_kg", "REAL");
+  ensureColumn(db, "scans", "special_handling", "TEXT");
   ensureColumn(db, "scans", "manual_dimensions_json", "TEXT");
   db.exec(
     "CREATE INDEX IF NOT EXISTS idx_scans_user_created_at ON scans(user_id, created_at DESC)",
   );
+  db.exec("CREATE INDEX IF NOT EXISTS idx_scans_user_pnr ON scans(user_id, pnr)");
+  db.exec("CREATE INDEX IF NOT EXISTS idx_scans_user_flight ON scans(user_id, flight_number)");
 
   return db;
 }
@@ -297,6 +348,45 @@ function normalizeText(value: string | undefined) {
   return trimmed ? trimmed : null;
 }
 
+function normalizeUpperText(value: string | null | undefined) {
+  const trimmed = normalizeText(value ?? undefined);
+  return trimmed ? trimmed.toUpperCase() : null;
+}
+
+function normalizeTravelContext(value: TravelContext | null | undefined): TravelContext | null {
+  if (!value) return null;
+  const travel = {
+    pnr: normalizeUpperText(value.pnr),
+    airline: normalizeText(value.airline ?? undefined),
+    flight_number: normalizeUpperText(value.flight_number),
+    flight_date: normalizeText(value.flight_date ?? undefined),
+    departure_airport: normalizeUpperText(value.departure_airport),
+    arrival_airport: normalizeUpperText(value.arrival_airport),
+    terminal: normalizeText(value.terminal ?? undefined),
+    bag_tag: normalizeUpperText(value.bag_tag),
+    baggage_category: normalizeText(value.baggage_category ?? undefined),
+    weight_kg: positiveNumber(value.weight_kg),
+    special_handling: normalizeText(value.special_handling ?? undefined),
+  };
+  return Object.values(travel).some((item) => item != null) ? travel : null;
+}
+
+function rowToTravelContext(row: ScanRow): TravelContext | null {
+  return normalizeTravelContext({
+    pnr: row.pnr,
+    airline: row.airline,
+    flight_number: row.flight_number,
+    flight_date: row.flight_date,
+    departure_airport: row.departure_airport,
+    arrival_airport: row.arrival_airport,
+    terminal: row.terminal,
+    bag_tag: row.bag_tag,
+    baggage_category: row.baggage_category,
+    weight_kg: row.weight_kg,
+    special_handling: row.special_handling,
+  });
+}
+
 function toObject(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -328,4 +418,13 @@ function parseManualDimensions(value: string | null): ManualDimensionsCm | null 
 
 function numberOrNull(value: unknown) {
   return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : null;
+}
+
+function positiveNumber(value: unknown) {
+  if (typeof value === "number" && Number.isFinite(value) && value > 0) return value;
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+  }
+  return null;
 }

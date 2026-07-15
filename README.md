@@ -27,9 +27,9 @@ Open:
 
 ## Modes
 
-- `/scan-local`: browser captures photos, local server function calls Gemini directly with `GEMINI_API_KEY_1`, requires Supabase auth.
+- `/scan-local`: browser captures photos plus optional PNR/flight/travel context, then local server function calls Gemini directly with `GEMINI_API_KEY_1`; requires Supabase auth.
 - `/reports-local`: saved scan reports and photo sets. Reads Supabase cloud storage first, with local fallback.
-- `/dashboard`: cloud analytics dashboard for dimensions, baggage type, material, condition, damage, and capture quality.
+- `/dashboard`: intelligence dashboard for airline/airport operations, insurance claims, baggage manufacturing, and customer service, including PNR/flight load planning and role-specific prescriptions.
 - `/scan`: original cloud mode, requires Supabase auth/storage/database and Lovable AI Gateway config.
 
 ## Auth
@@ -44,10 +44,15 @@ Completed scans are saved to Supabase first:
 
 - Postgres tables: `bagscan_sessions`, `bagscan_images`, `bagscan_extractions`,
   `bagscan_damage_findings`, `bagscan_validation_events`
+- `bagscan_sessions` also stores PNR, airline, flight, airport, terminal, bag tag, baggage category,
+  manual weight, and special-handling context for analytics.
 - Private Storage bucket: `bagscan-photos`
 - Raw Gemini analysis is stored as JSONB, while dashboard fields are normalized into typed columns.
 
 The app keeps owner-scoped RLS policies on scan rows and private image objects.
+
+The dashboard reads the unified scan history during rollout, so existing reports remain visible
+while the cloud storage path becomes the primary system of record.
 
 ## Local fallback storage
 

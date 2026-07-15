@@ -11,10 +11,25 @@ export type ManualDimensionsCm = {
   depth: number;
 };
 
+export type TravelContext = {
+  pnr?: string | null;
+  airline?: string | null;
+  flight_number?: string | null;
+  flight_date?: string | null;
+  departure_airport?: string | null;
+  arrival_airport?: string | null;
+  terminal?: string | null;
+  bag_tag?: string | null;
+  baggage_category?: string | null;
+  weight_kg?: number | null;
+  special_handling?: string | null;
+};
+
 export type SaveLocalScanData = {
   reference?: string;
   notes?: string;
   model: string;
+  travel_context?: TravelContext | null;
   manual_dimensions_cm?: ManualDimensionsCm | null;
   approved_review_views: BaggageView[];
   images: LocalScanImageInput[];
@@ -29,6 +44,7 @@ export type LocalScanSummary = {
   status: string;
   createdAt: string;
   updatedAt: string;
+  travelContext: TravelContext | null;
   manualDimensionsCm: ManualDimensionsCm | null;
   approvedReviewViews: string[];
   captureValidationStatus: string | null;
