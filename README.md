@@ -4,13 +4,13 @@ Lovable-generated baggage scan app with an added local Gemini mode.
 
 ## Local Gemini Mode
 
-Local Gemini mode uses the local `GEMINI_API_KEY_2` for analysis. `GEMINI_API_KEY` is kept only
-as a fallback. Scan and report routes still require Supabase sign-in.
+Local Gemini mode uses the local `GEMINI_API_KEY_1` for analysis. `GEMINI_API_KEY_2` and
+`GEMINI_API_KEY` are kept only as fallbacks. Scan and report routes still require Supabase sign-in.
 
 Create `.env.local`:
 
 ```bash
-GEMINI_API_KEY_2=your_gemini_api_key_here
+GEMINI_API_KEY_1=your_gemini_api_key_here
 ```
 
 Run:
@@ -27,7 +27,7 @@ Open:
 
 ## Modes
 
-- `/scan-local`: browser captures photos, local server function calls Gemini directly with `GEMINI_API_KEY_2`, requires Supabase auth.
+- `/scan-local`: browser captures photos, local server function calls Gemini directly with `GEMINI_API_KEY_1`, requires Supabase auth.
 - `/reports-local`: locally saved scan reports and photo sets.
 - `/scan`: original cloud mode, requires Supabase auth/storage/database and Lovable AI Gateway config.
 
@@ -57,5 +57,5 @@ baked into the image.
 docker compose up -d --build
 ```
 
-If a Gemini key is exposed, rotate it in Google Cloud/AI Studio, update `GEMINI_API_KEY_2` in the VM
+If a Gemini key is exposed, rotate it in Google Cloud/AI Studio, update `GEMINI_API_KEY_1` in the VM
 `.env`, and rebuild/restart the container.
