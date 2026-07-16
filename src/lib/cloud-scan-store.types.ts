@@ -150,6 +150,24 @@ export type CloudAnalytics = {
     sizeClass: string | null;
     overallCondition: string | null;
   }>;
+  manufacturingRecords: Array<{
+    id: string;
+    brandGuess: string | null;
+    bagType: string | null;
+    sizeClass: string | null;
+    shellType: string | null;
+    formFactor: string | null;
+    primaryColor: string | null;
+    material: string | null;
+    wheelCount: number | null;
+    wheelType: string | null;
+    overallCondition: string | null;
+    widthCm: number | null;
+    heightCm: number | null;
+    depthCm: number | null;
+    volumeLiters: number | null;
+    lockSignals: string[];
+  }>;
   airlineLoads: Array<{
     label: string;
     count: number;
@@ -189,9 +207,14 @@ export type CloudAnalytics = {
   baggageCategories: Array<{ label: string; count: number }>;
   brands: Array<{ label: string; count: number }>;
   formFactors: Array<{ label: string; count: number }>;
+  shellTypes: Array<{ label: string; count: number }>;
   sizeClasses: Array<{ label: string; count: number }>;
+  primaryColors: Array<{ label: string; count: number }>;
   conditions: Array<{ label: string; count: number }>;
   materials: Array<{ label: string; count: number }>;
+  wheelCounts: Array<{ label: string; count: number }>;
+  wheelTypes: Array<{ label: string; count: number }>;
+  lockSignals: Array<{ label: string; count: number }>;
   damageSeverity: Array<{ label: string; count: number }>;
   viewQuality: Array<{
     view: BaggageView;

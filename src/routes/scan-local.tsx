@@ -70,6 +70,14 @@ export const Route = createFileRoute("/scan-local")({
 
 type ImageMap = Partial<Record<BaggageView, string>>;
 type JsonObject = Record<string, unknown>;
+type ValueApprovalStatus = "approved" | "corrected";
+type ValueApproval = {
+  status: ValueApprovalStatus;
+  value: string;
+  correctedValue?: string;
+  updatedAt: string;
+};
+type ValueApprovalMap = Record<string, ValueApproval>;
 type TravelContextForm = Record<
   Exclude<keyof TravelContext, "weight_kg" | "baggage_category_source">,
   string
@@ -125,12 +133,18 @@ function LocalScanPage() {
   const [travelContext, setTravelContext] = useState<TravelContextForm>(EMPTY_TRAVEL_CONTEXT);
   const [analysis, setAnalysis] = useState<unknown>(null);
   const [savedScan, setSavedScan] = useState<CloudScanSummary | LocalScanSummary | null>(null);
+  const [valueApprovals, setValueApprovals] = useState<ValueApprovalMap>({});
   const [submitting, setSubmitting] = useState(false);
   const captureRef = useRef<HTMLDivElement | null>(null);
   const captureApiRef = useRef<BaggageCaptureHandle | null>(null);
 
   const capturedCount = useMemo(() => VIEWS.filter((view) => images[view.key]).length, [images]);
   const allCaptured = capturedCount === VIEWS.length;
+
+  useEffect(() => {
+    if (!savedScan || Object.keys(valueApprovals).length === 0) return;
+    localStorage.setItem(`bagscan:value-approvals:${savedScan.id}`, JSON.stringify(valueApprovals));
+  }, [savedScan, valueApprovals]);
 
   const validateCapturedView = async (view: BaggageView, dataUrl: string) => {
     setViewStatuses((current) => {
@@ -225,6 +239,7 @@ function LocalScanPage() {
     setSubmitting(true);
     setAnalysis(null);
     setSavedScan(null);
+    setValueApprovals({});
     try {
       const approvedViews = approvedViewList(approvedReviewViews);
       const result = await analyzeWithGemini({
@@ -299,6 +314,7 @@ function LocalScanPage() {
     if (changedViews.length > 0) {
       setAnalysis(null);
       setSavedScan(null);
+      setValueApprovals({});
       setViewStatuses((current) => {
         const updated = { ...current };
         changedViews.forEach((view) => {
@@ -385,6 +401,7 @@ function LocalScanPage() {
         imageDataUrl: images[view.key] ?? null,
       })),
       analysis,
+      valueApprovals,
     };
     const blob = new Blob([JSON.stringify(report, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
@@ -395,6 +412,29 @@ function LocalScanPage() {
     anchor.click();
     anchor.remove();
     URL.revokeObjectURL(url);
+  };
+
+  const approveValue = (key: string, value: string) => {
+    setValueApprovals((current) => ({
+      ...current,
+      [key]: {
+        status: "approved",
+        value,
+        updatedAt: new Date().toISOString(),
+      },
+    }));
+  };
+
+  const correctValue = (key: string, value: string, correctedValue: string) => {
+    setValueApprovals((current) => ({
+      ...current,
+      [key]: {
+        status: "corrected",
+        value,
+        correctedValue,
+        updatedAt: new Date().toISOString(),
+      },
+    }));
   };
 
   return (
@@ -417,6 +457,16 @@ function LocalScanPage() {
             <HudPill label="Terminal" value={travelContext.terminal.trim() || "BS-09"} />
           </div>
         </div>
+
+        <ReferencePanel
+          name={name}
+          setName={setName}
+          notes={notes}
+          setNotes={setNotes}
+          travelContext={travelContext}
+          setTravelContext={setTravelContext}
+          savedScan={savedScan}
+        />
 
         <div ref={captureRef}>
           <BaggageCapture
@@ -449,172 +499,6 @@ function LocalScanPage() {
           />
         </div>
 
-        <section className="mt-6 rounded-[14px] border bg-card p-5">
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-            <div className="md:col-span-2 xl:col-span-3">
-              <TextField
-                id="local-name"
-                label="Reference"
-                placeholder="e.g. BAG-1042"
-                value={name}
-                onChange={setName}
-              />
-            </div>
-            <TextField
-              id="travel-pnr"
-              label="PNR"
-              placeholder="e.g. Y7K9Q2"
-              value={travelContext.pnr}
-              onChange={(value) => updateTravelField(setTravelContext, "pnr", value)}
-            />
-            <TextField
-              id="travel-bag-tag"
-              label="Bag tag"
-              placeholder="e.g. 0987654321"
-              value={travelContext.bag_tag}
-              onChange={(value) => updateTravelField(setTravelContext, "bag_tag", value)}
-            />
-            <TextField
-              id="travel-airline"
-              label="Airline"
-              placeholder="e.g. IndiGo"
-              value={travelContext.airline}
-              onChange={(value) => updateTravelField(setTravelContext, "airline", value)}
-            />
-            <TextField
-              id="travel-flight"
-              label="Flight number"
-              placeholder="e.g. 6E204"
-              value={travelContext.flight_number}
-              onChange={(value) => updateTravelField(setTravelContext, "flight_number", value)}
-            />
-            <TextField
-              id="travel-date"
-              label="Flight date"
-              type="date"
-              value={travelContext.flight_date}
-              onChange={(value) => updateTravelField(setTravelContext, "flight_date", value)}
-            />
-            <TextField
-              id="travel-terminal"
-              label="Terminal"
-              placeholder="e.g. T2"
-              value={travelContext.terminal}
-              onChange={(value) => updateTravelField(setTravelContext, "terminal", value)}
-            />
-            <TextField
-              id="travel-departure"
-              label="Departure airport"
-              placeholder="e.g. BLR"
-              value={travelContext.departure_airport}
-              onChange={(value) => updateTravelField(setTravelContext, "departure_airport", value)}
-            />
-            <TextField
-              id="travel-arrival"
-              label="Arrival airport"
-              placeholder="e.g. DEL"
-              value={travelContext.arrival_airport}
-              onChange={(value) => updateTravelField(setTravelContext, "arrival_airport", value)}
-            />
-            <div className="md:col-span-2">
-              <div className="grid gap-1.5">
-                <Label
-                  htmlFor="travel-category"
-                  className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground"
-                >
-                  Baggage category
-                </Label>
-                <Input
-                  id="travel-category"
-                  className={cockpitInputClass}
-                  placeholder="Auto after scan, or enter cabin / check-in"
-                  value={travelContext.baggage_category}
-                  onChange={(event) =>
-                    setTravelContext((current) => ({
-                      ...current,
-                      baggage_category: event.target.value,
-                      baggage_category_source: event.target.value.trim() ? "operator_override" : "",
-                    }))
-                  }
-                />
-                <div className="font-mono text-[10px] text-muted-foreground">
-                  {travelContext.baggage_category_source === "system"
-                    ? "Suggested from dimensions. Operator can override."
-                    : "Leave blank to suggest cabin or check-in from detected dimensions."}
-                </div>
-              </div>
-            </div>
-            <TextField
-              id="travel-weight"
-              label="Weight kg"
-              inputMode="decimal"
-              placeholder="e.g. 18.5"
-              value={travelContext.weight_kg}
-              onChange={(value) => updateTravelField(setTravelContext, "weight_kg", value)}
-            />
-            <div className="md:col-span-2 xl:col-span-3">
-              <div className="grid gap-1.5">
-                <Label
-                  htmlFor="travel-special-handling"
-                  className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground"
-                >
-                  Special handling
-                </Label>
-                <Textarea
-                  id="travel-special-handling"
-                  className={cockpitTextareaClass}
-                  placeholder="Fragile, wheelchair support, priority handling, or claim notes"
-                  value={travelContext.special_handling}
-                  onChange={(event) =>
-                    updateTravelField(setTravelContext, "special_handling", event.target.value)
-                  }
-                />
-              </div>
-            </div>
-            <div className="md:col-span-2 xl:col-span-3">
-              <div className="grid gap-1.5">
-                <Label
-                  htmlFor="local-notes"
-                  className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground"
-                >
-                  Operator notes
-                </Label>
-                <Textarea
-                  id="local-notes"
-                  className={cockpitTextareaClass}
-                  placeholder="Visible marks, handling notes, or exception context"
-                  value={notes}
-                  onChange={(event) => setNotes(event.target.value)}
-                />
-              </div>
-            </div>
-          </div>
-
-          {savedScan ? (
-            <div className="mt-4 flex flex-col gap-3 rounded-[10px] border border-primary/30 bg-primary/10 p-3 text-sm sm:flex-row sm:items-center sm:justify-between">
-              <div className="flex min-w-0 items-center gap-2">
-                <Database className="h-4 w-4 shrink-0 text-primary" />
-                <div className="min-w-0">
-                  <div className="font-mono text-[10px] uppercase tracking-[0.16em] text-primary">
-                    Saved profile
-                  </div>
-                  <div className="truncate text-xs text-muted-foreground">{savedScan.id}</div>
-                </div>
-              </div>
-              <Button
-                className="h-9 rounded-[10px] border border-primary/40 bg-transparent px-3 font-mono text-[10px] uppercase tracking-[0.14em] text-primary hover:bg-primary/10"
-                variant="outline"
-                asChild
-              >
-                <Link to="/reports-local/$id" params={{ id: savedScan.id }}>
-                  <ExternalLink className="mr-2 h-4 w-4" />
-                  Open report
-                </Link>
-              </Button>
-            </div>
-          ) : null}
-        </section>
-
         {analysis ? (
           <section className="mt-6 rounded-[14px] border bg-card p-5">
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
@@ -638,8 +522,11 @@ function LocalScanPage() {
             <AnalysisSummary
               analysis={analysis}
               approvedReviewViews={approvedReviewViews}
+              valueApprovals={valueApprovals}
               onApproveView={approveView}
               onCorrectView={correctView}
+              onApproveValue={approveValue}
+              onCorrectValue={correctValue}
             />
           </section>
         ) : null}
@@ -763,6 +650,204 @@ function ScanActionLink({ children }: { children: ReactNode }) {
   );
 }
 
+function ReferencePanel({
+  name,
+  setName,
+  notes,
+  setNotes,
+  travelContext,
+  setTravelContext,
+  savedScan,
+}: {
+  name: string;
+  setName: (value: string) => void;
+  notes: string;
+  setNotes: (value: string) => void;
+  travelContext: TravelContextForm;
+  setTravelContext: Dispatch<SetStateAction<TravelContextForm>>;
+  savedScan: CloudScanSummary | LocalScanSummary | null;
+}) {
+  return (
+    <section className="mb-6 rounded-[14px] border bg-card p-5">
+      <div className="mb-4 flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <h2 className="font-mono text-[12px] font-semibold uppercase tracking-[0.18em] text-primary">
+            Reference and journey context
+          </h2>
+          <p className="mt-1 text-[13px] text-muted-foreground">
+            Fill these fields before capture so analytics can connect the bag to passenger, airline,
+            airport, and manufacturing signals.
+          </p>
+        </div>
+      </div>
+
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+        <div className="md:col-span-2 xl:col-span-3">
+          <TextField
+            id="local-name"
+            label="Reference"
+            placeholder="e.g. BAG-1042"
+            value={name}
+            onChange={setName}
+          />
+        </div>
+        <TextField
+          id="travel-pnr"
+          label="PNR"
+          placeholder="e.g. Y7K9Q2"
+          value={travelContext.pnr}
+          onChange={(value) => updateTravelField(setTravelContext, "pnr", value)}
+        />
+        <TextField
+          id="travel-bag-tag"
+          label="Bag tag"
+          placeholder="e.g. 0987654321"
+          value={travelContext.bag_tag}
+          onChange={(value) => updateTravelField(setTravelContext, "bag_tag", value)}
+        />
+        <TextField
+          id="travel-airline"
+          label="Airline"
+          placeholder="e.g. IndiGo"
+          value={travelContext.airline}
+          onChange={(value) => updateTravelField(setTravelContext, "airline", value)}
+        />
+        <TextField
+          id="travel-flight"
+          label="Flight number"
+          placeholder="e.g. 6E204"
+          value={travelContext.flight_number}
+          onChange={(value) => updateTravelField(setTravelContext, "flight_number", value)}
+        />
+        <TextField
+          id="travel-date"
+          label="Flight date"
+          type="date"
+          value={travelContext.flight_date}
+          onChange={(value) => updateTravelField(setTravelContext, "flight_date", value)}
+        />
+        <TextField
+          id="travel-terminal"
+          label="Terminal"
+          placeholder="e.g. T2"
+          value={travelContext.terminal}
+          onChange={(value) => updateTravelField(setTravelContext, "terminal", value)}
+        />
+        <TextField
+          id="travel-departure"
+          label="Departure airport"
+          placeholder="e.g. BLR"
+          value={travelContext.departure_airport}
+          onChange={(value) => updateTravelField(setTravelContext, "departure_airport", value)}
+        />
+        <TextField
+          id="travel-arrival"
+          label="Arrival airport"
+          placeholder="e.g. DEL"
+          value={travelContext.arrival_airport}
+          onChange={(value) => updateTravelField(setTravelContext, "arrival_airport", value)}
+        />
+        <div className="md:col-span-2">
+          <div className="grid gap-1.5">
+            <Label
+              htmlFor="travel-category"
+              className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground"
+            >
+              Baggage category
+            </Label>
+            <Input
+              id="travel-category"
+              className={cockpitInputClass}
+              placeholder="Auto after scan, or enter cabin / check-in"
+              value={travelContext.baggage_category}
+              onChange={(event) =>
+                setTravelContext((current) => ({
+                  ...current,
+                  baggage_category: event.target.value,
+                  baggage_category_source: event.target.value.trim() ? "operator_override" : "",
+                }))
+              }
+            />
+            <div className="font-mono text-[10px] text-muted-foreground">
+              {travelContext.baggage_category_source === "system"
+                ? "Suggested from dimensions. Operator can override."
+                : "Leave blank to suggest cabin or check-in from detected dimensions."}
+            </div>
+          </div>
+        </div>
+        <TextField
+          id="travel-weight"
+          label="Weight kg"
+          inputMode="decimal"
+          placeholder="e.g. 18.5"
+          value={travelContext.weight_kg}
+          onChange={(value) => updateTravelField(setTravelContext, "weight_kg", value)}
+        />
+        <div className="md:col-span-2 xl:col-span-3">
+          <div className="grid gap-1.5">
+            <Label
+              htmlFor="travel-special-handling"
+              className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground"
+            >
+              Special handling
+            </Label>
+            <Textarea
+              id="travel-special-handling"
+              className={cockpitTextareaClass}
+              placeholder="Fragile, wheelchair support, priority handling, or claim notes"
+              value={travelContext.special_handling}
+              onChange={(event) =>
+                updateTravelField(setTravelContext, "special_handling", event.target.value)
+              }
+            />
+          </div>
+        </div>
+        <div className="md:col-span-2 xl:col-span-3">
+          <div className="grid gap-1.5">
+            <Label
+              htmlFor="local-notes"
+              className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground"
+            >
+              Operator notes
+            </Label>
+            <Textarea
+              id="local-notes"
+              className={cockpitTextareaClass}
+              placeholder="Visible marks, handling notes, or exception context"
+              value={notes}
+              onChange={(event) => setNotes(event.target.value)}
+            />
+          </div>
+        </div>
+      </div>
+
+      {savedScan ? (
+        <div className="mt-4 flex flex-col gap-3 rounded-[10px] border border-primary/30 bg-primary/10 p-3 text-sm sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex min-w-0 items-center gap-2">
+            <Database className="h-4 w-4 shrink-0 text-primary" />
+            <div className="min-w-0">
+              <div className="font-mono text-[10px] uppercase tracking-[0.16em] text-primary">
+                Saved profile
+              </div>
+              <div className="truncate text-xs text-muted-foreground">{savedScan.id}</div>
+            </div>
+          </div>
+          <Button
+            className="h-9 rounded-[10px] border border-primary/40 bg-transparent px-3 font-mono text-[10px] uppercase tracking-[0.14em] text-primary hover:bg-primary/10"
+            variant="outline"
+            asChild
+          >
+            <Link to="/reports-local/$id" params={{ id: savedScan.id }}>
+              <ExternalLink className="mr-2 h-4 w-4" />
+              Open report
+            </Link>
+          </Button>
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
 function TextField({
   id,
   label,
@@ -804,13 +889,19 @@ function TextField({
 function AnalysisSummary({
   analysis,
   approvedReviewViews,
+  valueApprovals,
   onApproveView,
   onCorrectView,
+  onApproveValue,
+  onCorrectValue,
 }: {
   analysis: unknown;
   approvedReviewViews: Partial<Record<BaggageView, boolean>>;
+  valueApprovals: ValueApprovalMap;
   onApproveView: (view: BaggageView) => void | Promise<void>;
   onCorrectView: (view: BaggageView) => void;
+  onApproveValue: (key: string, value: string) => void;
+  onCorrectValue: (key: string, value: string, correctedValue: string) => void;
 }) {
   if (!analysis || typeof analysis !== "object" || Array.isArray(analysis)) return null;
 
@@ -839,6 +930,13 @@ function AnalysisSummary({
         onCorrectView={onCorrectView}
       />
 
+      <ValueApprovalPanel
+        fields={approvalFieldsForAnalysis(item)}
+        approvals={valueApprovals}
+        onApprove={onApproveValue}
+        onCorrect={onCorrectValue}
+      />
+
       <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         {fields.map(([label, value]) => (
           <div key={label} className="rounded-xl border bg-surface-elevated p-4">
@@ -849,6 +947,171 @@ function AnalysisSummary({
       </div>
     </>
   );
+}
+
+type ApprovalField = {
+  key: string;
+  label: string;
+  value: string;
+  rationale: string;
+};
+
+function ValueApprovalPanel({
+  fields,
+  approvals,
+  onApprove,
+  onCorrect,
+}: {
+  fields: ApprovalField[];
+  approvals: ValueApprovalMap;
+  onApprove: (key: string, value: string) => void;
+  onCorrect: (key: string, value: string, correctedValue: string) => void;
+}) {
+  const decided = fields.filter((field) => approvals[field.key]).length;
+  return (
+    <section className="mt-5 rounded-[14px] border bg-background/40 p-4">
+      <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <h3 className="font-mono text-[12px] font-semibold uppercase tracking-[0.16em] text-primary">
+            Operator approval
+          </h3>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Confirm or correct AI-generated values. These approvals are kept locally and included in
+            report export.
+          </p>
+        </div>
+        <div className="font-mono text-[12px] text-muted-foreground">
+          {decided}/{fields.length} reviewed
+        </div>
+      </div>
+
+      <div className="mt-4 grid gap-2">
+        {fields.map((field) => {
+          const approval = approvals[field.key];
+          const correctedValue = approval?.correctedValue ?? "";
+          return (
+            <div
+              key={field.key}
+              className="grid gap-3 rounded-[10px] border bg-card p-3 lg:grid-cols-[0.8fr_1.1fr_auto]"
+            >
+              <div>
+                <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
+                  {field.label}
+                </div>
+                <div className="mt-1 text-sm text-foreground">{field.value}</div>
+                <div className="mt-1 text-xs text-muted-foreground">{field.rationale}</div>
+              </div>
+              <div className="min-w-0">
+                {approval?.status === "corrected" ? (
+                  <Input
+                    className={cockpitInputClass}
+                    placeholder="Enter operator-corrected value"
+                    value={correctedValue}
+                    onChange={(event) =>
+                      onCorrect(field.key, field.value, event.currentTarget.value)
+                    }
+                  />
+                ) : (
+                  <div className="flex h-full items-center text-xs text-muted-foreground">
+                    {approval?.status === "approved"
+                      ? "Approved by operator"
+                      : "Awaiting operator decision"}
+                  </div>
+                )}
+              </div>
+              <div className="flex flex-wrap items-center gap-2 lg:justify-end">
+                <Button
+                  className="h-8 rounded-md px-3 text-xs"
+                  variant={approval?.status === "approved" ? "default" : "outline"}
+                  onClick={() => onApprove(field.key, field.value)}
+                >
+                  Approve
+                </Button>
+                <Button
+                  className="h-8 rounded-md px-3 text-xs"
+                  variant={approval?.status === "corrected" ? "secondary" : "outline"}
+                  onClick={() => onCorrect(field.key, field.value, correctedValue)}
+                >
+                  Correct
+                </Button>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+function approvalFieldsForAnalysis(item: JsonObject): ApprovalField[] {
+  const colors = toObject(item.colors);
+  const dimensions = toObject(item.dimensions_cm);
+  const wheels = toObject(item.wheels);
+  const features = Array.isArray(item.features) ? item.features.map(String) : [];
+  const lockFeatures = features.filter((feature) => /lock/i.test(feature));
+
+  return [
+    {
+      key: "bag_type",
+      label: "Bag type",
+      value: formatValue(item.bag_type),
+      rationale: "Used by airline, airport, insurance, and manufacturer dashboards.",
+    },
+    {
+      key: "size_class",
+      label: "Size class",
+      value: formatValue(item.size_class),
+      rationale: "Drives cabin/check-in suggestion and size planning.",
+    },
+    {
+      key: "dimensions_cm",
+      label: "Dimensions",
+      value: formatValue(formatDimensions(dimensions)),
+      rationale: "Used for capacity, oversize, product range, and customer claim decisions.",
+    },
+    {
+      key: "primary_color",
+      label: "Primary color",
+      value: formatValue(colors?.primary),
+      rationale: "Feeds color preference and manufacturer demand analytics.",
+    },
+    {
+      key: "material_shell",
+      label: "Material / shell",
+      value: [item.material, item.shell_type].map(formatValue).join(" / "),
+      rationale: "Separates hard-shell, soft-shell, hybrid, and material demand signals.",
+    },
+    {
+      key: "form_factor",
+      label: "Form factor",
+      value: formatValue(item.luggage_form_factor),
+      rationale: "Segments spinner suitcase, duffel, backpack, carton, and other shapes.",
+    },
+    {
+      key: "wheels",
+      label: "Wheels",
+      value: `${formatValue(wheels?.count)} ${formatValue(wheels?.type)}`,
+      rationale: "Helps compare spinner, inline, and no-wheel preferences.",
+    },
+    {
+      key: "locks",
+      label: "Lock features",
+      value: lockFeatures.length ? lockFeatures.join(", ") : "No lock visible",
+      rationale: "Useful for TSA-lock and security-feature demand planning.",
+    },
+    {
+      key: "brand_guess",
+      label: "Brand signal",
+      value: [item.brand_guess, item.brand_confidence].filter(Boolean).map(formatValue).join(" · "),
+      rationale: "Supports brand drill-down only when visible make/logo is reliable.",
+    },
+    {
+      key: "overall_condition",
+      label: "Condition",
+      value: formatValue(item.overall_condition),
+      rationale: "Feeds quality, claims, and design durability analytics.",
+    },
+  ];
 }
 
 function CaptureReview({

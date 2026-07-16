@@ -57,13 +57,20 @@ export const BaggageCapture = forwardRef<BaggageCaptureHandle, BaggageCapturePro
       side: null,
     });
 
-    const setActiveView = useCallback(
+    const moveToView = useCallback(
       (view: BaggageView) => {
-        if (!images[view] && firstMissingView && view !== firstMissingView) return;
         if (onActiveViewChange) onActiveViewChange(view);
         else setInternalActiveView(view);
       },
-      [firstMissingView, images, onActiveViewChange],
+      [onActiveViewChange],
+    );
+
+    const setActiveView = useCallback(
+      (view: BaggageView) => {
+        if (!images[view] && firstMissingView && view !== firstMissingView) return;
+        moveToView(view);
+      },
+      [firstMissingView, images, moveToView],
     );
 
     const resetInput = useCallback((view: BaggageView) => {
@@ -94,12 +101,12 @@ export const BaggageCapture = forwardRef<BaggageCaptureHandle, BaggageCapturePro
           const nextImages = { ...images, [view]: dataUrl };
           onChange(nextImages);
           const nextEmpty = VIEWS.find((v) => !nextImages[v.key]);
-          if (nextEmpty) setActiveView(nextEmpty.key);
+          if (nextEmpty) moveToView(nextEmpty.key);
         } finally {
           setProcessingView(null);
         }
       },
-      [firstMissingView, images, isBusy, onChange, onValidateImage, setActiveView],
+      [firstMissingView, images, isBusy, moveToView, onChange, onValidateImage],
     );
 
     const clear = useCallback(

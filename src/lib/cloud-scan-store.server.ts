@@ -289,7 +289,7 @@ export async function getCloudAnalytics(
       supabase
         .from("bagscan_extractions")
         .select(
-          "scan_id,org_id,bag_type,size_class,brand_guess,brand_confidence,visible_logo_text,model_guess,model_confidence,shell_type,luggage_form_factor,material,overall_condition,width_cm,height_cm,depth_cm,quality_score,identity_score,volume_liters",
+          "scan_id,org_id,bag_type,size_class,brand_guess,brand_confidence,visible_logo_text,model_guess,model_confidence,shell_type,luggage_form_factor,primary_color,material,overall_condition,wheel_count,wheel_type,width_cm,height_cm,depth_cm,quality_score,identity_score,volume_liters,raw_analysis",
         )
         .limit(5000),
       supabase
@@ -378,6 +378,7 @@ export async function getCloudAnalytics(
       baggageCategories: sortedUnique(travelRows.map((row) => row.baggageCategory)),
     },
     travelRecords: travelRows.map(travelRecordForDashboard),
+    manufacturingRecords: extractions.map(manufacturingRecordForDashboard),
     airlineLoads: groupedTravelLoads(travelRows, airlineLabel),
     airportLoads: groupedTravelLoads(travelRows, airportLabel),
     flightLoads: groupedTravelLoads(travelRows, flightLabel),
@@ -387,9 +388,14 @@ export async function getCloudAnalytics(
     baggageCategories: distribution(sessions, "baggage_category"),
     brands: distribution(extractions, "brand_guess"),
     formFactors: distribution(extractions, "luggage_form_factor"),
+    shellTypes: distribution(extractions, "shell_type"),
     sizeClasses: distribution(extractions, "size_class"),
+    primaryColors: distribution(extractions, "primary_color"),
     conditions: distribution(extractions, "overall_condition"),
     materials: distribution(extractions, "material"),
+    wheelCounts: distribution(extractions, "wheel_count"),
+    wheelTypes: distribution(extractions, "wheel_type"),
+    lockSignals: featureDistribution(extractions, (feature) => /lock/i.test(feature)),
     damageSeverity: distribution(damages, "severity"),
     viewQuality: VIEWS.map((view) => {
       const viewRows = images.filter((row) => stringField(row, "view") === view.key);
@@ -587,13 +593,38 @@ function countBy(items: Row[], key: string) {
 function distribution(rowsToCount: Row[], key: string) {
   const counts = new Map<string, number>();
   for (const row of rowsToCount) {
-    const label = stringOrNull(row[key]) ?? "unknown";
+    const label = labelFromValue(row[key]);
     counts.set(label, (counts.get(label) ?? 0) + 1);
   }
   return [...counts.entries()]
     .map(([label, count]) => ({ label, count }))
     .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label))
     .slice(0, 12);
+}
+
+function featureDistribution(rowsToCount: Row[], predicate: (feature: string) => boolean) {
+  const counts = new Map<string, number>();
+  for (const row of rowsToCount) {
+    const analysis = parseDataObject(row.raw_analysis);
+    const features = Array.isArray(analysis?.features) ? analysis.features.map(String) : [];
+    const matched = features.filter((feature) => predicate(feature));
+    if (matched.length === 0) {
+      counts.set("not_visible", (counts.get("not_visible") ?? 0) + 1);
+      continue;
+    }
+    for (const feature of matched) counts.set(feature, (counts.get(feature) ?? 0) + 1);
+  }
+  return [...counts.entries()]
+    .map(([label, count]) => ({ label, count }))
+    .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label))
+    .slice(0, 12);
+}
+
+function labelFromValue(value: unknown) {
+  if (typeof value === "string") return stringOrNull(value) ?? "unknown";
+  if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  if (typeof value === "boolean") return value ? "true" : "false";
+  return "unknown";
 }
 
 function travelAnalyticsRows(
@@ -646,6 +677,29 @@ function travelRecordForDashboard(row: TravelAnalyticsRow) {
     bagType: row.bagType,
     sizeClass: row.sizeClass,
     overallCondition: row.overallCondition,
+  };
+}
+
+function manufacturingRecordForDashboard(row: Row) {
+  const analysis = parseDataObject(row.raw_analysis);
+  const features = Array.isArray(analysis?.features) ? analysis.features.map(String) : [];
+  return {
+    id: stringField(row, "scan_id"),
+    brandGuess: stringOrNull(row.brand_guess),
+    bagType: stringOrNull(row.bag_type),
+    sizeClass: stringOrNull(row.size_class),
+    shellType: stringOrNull(row.shell_type),
+    formFactor: stringOrNull(row.luggage_form_factor),
+    primaryColor: stringOrNull(row.primary_color),
+    material: stringOrNull(row.material),
+    wheelCount: numberField(row, "wheel_count"),
+    wheelType: stringOrNull(row.wheel_type),
+    overallCondition: stringOrNull(row.overall_condition),
+    widthCm: numberField(row, "width_cm"),
+    heightCm: numberField(row, "height_cm"),
+    depthCm: numberField(row, "depth_cm"),
+    volumeLiters: numberField(row, "volume_liters"),
+    lockSignals: features.filter((feature) => /lock/i.test(feature)),
   };
 }
 

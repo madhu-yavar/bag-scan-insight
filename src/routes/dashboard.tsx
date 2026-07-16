@@ -57,6 +57,7 @@ type IconType = ComponentType<{ className?: string }>;
 type DashboardView = "airline" | "airport" | "insurance" | "manufacturing" | "service";
 type TravelRecord = CloudAnalytics["travelRecords"][number];
 type TravelLoadItem = CloudAnalytics["flightLoads"][number];
+type ManufacturingRecord = CloudAnalytics["manufacturingRecords"][number];
 type AirlineFilters = {
   airline: string;
   date: string;
@@ -644,85 +645,168 @@ function InsuranceView({ analytics }: { analytics: CloudAnalytics }) {
 }
 
 function ManufacturingView({ analytics }: { analytics: CloudAnalytics }) {
+  const [brand, setBrand] = useState("all");
+  const scopedRecords = useMemo(
+    () =>
+      analytics.manufacturingRecords.filter(
+        (record) => brand === "all" || record.brandGuess === brand,
+      ),
+    [analytics.manufacturingRecords, brand],
+  );
+  const summary = useMemo(() => summarizeManufacturingRecords(scopedRecords), [scopedRecords]);
+  const brandDistribution = useMemo(
+    () => distributionFromManufacturingRecords(scopedRecords, "brandGuess"),
+    [scopedRecords],
+  );
+  const shellDistribution = useMemo(
+    () => distributionFromManufacturingRecords(scopedRecords, "shellType"),
+    [scopedRecords],
+  );
+  const colorDistribution = useMemo(
+    () => distributionFromManufacturingRecords(scopedRecords, "primaryColor"),
+    [scopedRecords],
+  );
+  const sizeDistribution = useMemo(
+    () => distributionFromManufacturingRecords(scopedRecords, "sizeClass"),
+    [scopedRecords],
+  );
+  const formDistribution = useMemo(
+    () => distributionFromManufacturingRecords(scopedRecords, "formFactor"),
+    [scopedRecords],
+  );
+  const materialDistribution = useMemo(
+    () => distributionFromManufacturingRecords(scopedRecords, "material"),
+    [scopedRecords],
+  );
+  const wheelCountDistribution = useMemo(
+    () => distributionFromManufacturingRecords(scopedRecords, "wheelCount"),
+    [scopedRecords],
+  );
+  const wheelTypeDistribution = useMemo(
+    () => distributionFromManufacturingRecords(scopedRecords, "wheelType"),
+    [scopedRecords],
+  );
+  const lockDistribution = useMemo(
+    () => lockDistributionFromManufacturingRecords(scopedRecords),
+    [scopedRecords],
+  );
+  const conditionDistribution = useMemo(
+    () => distributionFromManufacturingRecords(scopedRecords, "overallCondition"),
+    [scopedRecords],
+  );
+
   return (
     <section className="space-y-6">
       <RoleIntro
         icon={Factory}
-        title="Baggage manufacturer insights"
-        description="Understand product mix, material performance, condition trends, and damage patterns that can influence design standards."
+        title="Manufacturer product planning"
+        description="Use scanned baggage evidence to plan shell mix, color SKUs, size ranges, wheel systems, locks, and brand-level portfolio decisions."
+      />
+      <FilterBar
+        filters={[
+          {
+            label: "Brand scope",
+            value: brand,
+            onChange: setBrand,
+            options: analytics.brands
+              .filter((item) => isKnownLabel(item.label))
+              .map((item) => item.label),
+          },
+        ]}
       />
       <MetricGrid>
         <MetricCard
           icon={Briefcase}
-          label="Detected brands"
-          value={knownItemCount(analytics.brands)}
-          helper="Visible make or logo only"
+          label="Product evidence"
+          value={summary.records}
+          helper={`${knownItemCount(brandDistribution)} visible brands in selected scope`}
         />
         <MetricCard
           icon={PackageSearch}
-          label="Product types"
-          value={knownItemCount(
-            analytics.formFactors.length ? analytics.formFactors : analytics.bagTypes,
-          )}
-          helper="Classified baggage shapes"
-        />
-        <MetricCard
-          icon={Activity}
-          label="Top condition"
-          value={topLabel(analytics.conditions)}
-          helper="Most frequent condition"
+          label="Hard-shell demand"
+          value={formatPercent(summary.hardShellShare)}
+          helper={`${summary.hardShellCount} hard-shell or polycarbonate signals`}
           tone="accent"
         />
         <MetricCard
-          icon={TriangleAlert}
-          label="Damage rate"
-          value={formatPercent(analytics.operational.damageRate)}
-          helper={`${analytics.totals.damages} findings across scans`}
-          tone="warning"
+          icon={Activity}
+          label="Top colour"
+          value={topLabel(colorDistribution)}
+          helper="Colour SKU signal from visible primary colour"
+        />
+        <MetricCard
+          icon={Gauge}
+          label="Wheel preference"
+          value={topLabel(wheelTypeDistribution)}
+          helper={`${topLabel(wheelCountDistribution)} wheels is the leading count`}
         />
       </MetricGrid>
-      <div className="grid gap-6 lg:grid-cols-2">
+      <ManufacturingDecisionPanel
+        summary={summary}
+        shellDistribution={shellDistribution}
+        colorDistribution={colorDistribution}
+        sizeDistribution={sizeDistribution}
+        wheelTypeDistribution={wheelTypeDistribution}
+        brand={brand}
+      />
+      <PrescriptionPanel
+        title="Manufacturing prescriptions"
+        items={manufacturingPrescriptions(scopedRecords, brand)}
+      />
+      <div className="grid gap-6 lg:grid-cols-3">
         <DistributionBarPanel
-          title="Visible brand signals"
+          title="Brand signals"
           icon={Factory}
-          items={analytics.brands}
-          emptyLabel="No visible brand signals yet"
-        />
-        <DistributionDonutPanel
-          title="Form factor mix"
-          icon={Briefcase}
-          items={analytics.formFactors}
-          emptyLabel="No form-factor data yet"
+          items={brandDistribution}
+          emptyLabel="No visible brand signals in this scope"
         />
         <DistributionBarPanel
-          title="Baggage type mix"
+          title="Shell strategy"
+          icon={PackageSearch}
+          items={shellDistribution}
+          emptyLabel="No shell signals in this scope"
+        />
+        <DistributionBarPanel
+          title="Primary colour demand"
           icon={BarChart3}
-          items={analytics.bagTypes}
-          emptyLabel="No baggage types yet"
+          items={colorDistribution}
+          emptyLabel="No colour signals in this scope"
+        />
+        <DistributionBarPanel
+          title="Size range"
+          icon={Ruler}
+          items={sizeDistribution}
+          emptyLabel="No size class data in this scope"
+        />
+        <DistributionBarPanel
+          title="Form factor"
+          icon={Briefcase}
+          items={formDistribution}
+          emptyLabel="No form-factor data in this scope"
         />
         <DistributionBarPanel
           title="Material mix"
           icon={PackageSearch}
-          items={analytics.materials}
-          emptyLabel="No materials yet"
+          items={materialDistribution}
+          emptyLabel="No materials in this scope"
         />
-      </div>
-      <PrescriptionPanel
-        title="Manufacturing prescriptions"
-        items={manufacturingPrescriptions(analytics)}
-      />
-      <div className="grid gap-6 lg:grid-cols-2">
         <DistributionBarPanel
-          title="Condition trend"
-          icon={Activity}
-          items={analytics.conditions}
-          emptyLabel="No condition data yet"
+          title="Wheel count"
+          icon={Gauge}
+          items={wheelCountDistribution}
+          emptyLabel="No wheel count signals in this scope"
         />
-        <DistributionDonutPanel
-          title="Damage severity"
-          icon={TriangleAlert}
-          items={analytics.damageSeverity}
-          emptyLabel="No damage recorded"
+        <DistributionBarPanel
+          title="Lock and security features"
+          icon={ShieldCheck}
+          items={lockDistribution}
+          emptyLabel="No lock signals in this scope"
+        />
+        <DistributionBarPanel
+          title="Observed condition"
+          icon={Activity}
+          items={conditionDistribution}
+          emptyLabel="No condition data in this scope"
         />
       </div>
     </section>
@@ -978,33 +1062,49 @@ function insurancePrescriptions(analytics: CloudAnalytics): Prescription[] {
   ];
 }
 
-function manufacturingPrescriptions(analytics: CloudAnalytics): Prescription[] {
-  const brand = topItem(analytics.brands);
-  const type = topItem(analytics.formFactors.length ? analytics.formFactors : analytics.bagTypes);
-  const condition = topItem(analytics.conditions);
+function manufacturingPrescriptions(
+  records: ManufacturingRecord[],
+  brandScope: string,
+): Prescription[] {
+  const summary = summarizeManufacturingRecords(records);
+  const shell = topItem(distributionFromManufacturingRecords(records, "shellType"));
+  const color = topItem(distributionFromManufacturingRecords(records, "primaryColor"));
+  const size = topItem(distributionFromManufacturingRecords(records, "sizeClass"));
+  const form = topItem(distributionFromManufacturingRecords(records, "formFactor"));
+  const wheel = topItem(distributionFromManufacturingRecords(records, "wheelType"));
+  const locks = topItem(lockDistributionFromManufacturingRecords(records));
+  const scope = brandScope === "all" ? "the selected market" : formatLabel(brandScope);
+
   return [
     {
-      title: "Track visible make",
-      detail: brand
-        ? `${formatLabel(brand.label)} is the strongest visible brand signal. Use this for portfolio and competitor benchmarking only when logo confidence is clear.`
-        : "No visible make is detected yet. Operators need clearer logo/text photos for manufacturer analytics.",
-      tone: brand ? "primary" : "warning",
+      title: "Plan shell and size portfolio",
+      detail:
+        shell || size
+          ? `${scope} is showing ${shell ? formatLabel(shell.label) : "unclear shell"} demand with ${
+              size ? formatLabel(size.label) : "unclear size"
+            } as the leading size class. Use this to tune hard-shell/soft-shell mix and cabin vs check-in product ranges.`
+          : "Shell and size signals are not mature yet. Ask operators to approve dimensions and shell type after scan before making SKU decisions.",
+      tone: shell || size ? "accent" : "warning",
     },
     {
-      title: "Segment product design",
-      detail: type
-        ? `${formatLabel(type.label)} is the leading form factor. Compare dimensions, material, and damage concentration for this segment.`
-        : "Form-factor mix is not mature yet. Capture more bags before design decisions.",
-      tone: type ? "accent" : "warning",
+      title: "Tune colour and form factor SKUs",
+      detail:
+        color || form
+          ? `${color ? formatLabel(color.label) : "Colour"} and ${
+              form ? formatLabel(form.label) : "form factor"
+            } are the strongest customer-visible signals. Use this for colour inventory, surface finish, and body-shape planning.`
+          : "Colour and form-factor signals are missing. Better front/back photos and operator approvals will improve manufacturer analytics.",
+      tone: color || form ? "primary" : "warning",
     },
     {
-      title: "Review quality standard",
-      detail: condition
-        ? `${formatLabel(condition.label)} is the most common condition. Damage rate is ${formatPercent(
-            analytics.operational.damageRate,
-          )}, which should feed product quality thresholds.`
-        : "Condition trend is not mature yet. Capture more bags before making manufacturing decisions.",
-      tone: (analytics.operational.damageRate ?? 0) > 0.15 ? "warning" : "primary",
+      title: "Standardize wheels and security",
+      detail:
+        wheel || locks
+          ? `${wheel ? formatLabel(wheel.label) : "Wheel type"} is leading and ${
+              locks ? formatLabel(locks.label) : "lock visibility is low"
+            }. Use this for wheel module, lock placement, and security-feature roadmap decisions.`
+          : `Only ${summary.records} records are available for wheel/security planning. Capture top/side views clearly and approve wheel and lock values.`,
+      tone: wheel || locks ? "accent" : "warning",
     },
   ];
 }
@@ -1177,6 +1277,41 @@ function PlanningRow({ label, value }: { label: string; value: string }) {
       <span className="text-muted-foreground">{label}</span>
       <span className="text-right font-mono text-[13px] text-foreground">{value}</span>
     </div>
+  );
+}
+
+function ManufacturingDecisionPanel({
+  summary,
+  shellDistribution,
+  colorDistribution,
+  sizeDistribution,
+  wheelTypeDistribution,
+  brand,
+}: {
+  summary: ManufacturingSummary;
+  shellDistribution: DistributionItem[];
+  colorDistribution: DistributionItem[];
+  sizeDistribution: DistributionItem[];
+  wheelTypeDistribution: DistributionItem[];
+  brand: string;
+}) {
+  return (
+    <ChartFrame title="Design decision signals" icon={Factory}>
+      <p className="text-[13px] leading-5 text-muted-foreground">
+        These are demand and design signals from the selected brand scope. They are not production
+        forecasts yet, but they show what customers are actually scanning and using.
+      </p>
+      <div className="mt-5 grid gap-2 text-sm md:grid-cols-2">
+        <PlanningRow label="Brand scope" value={brand === "all" ? "All visible brands" : brand} />
+        <PlanningRow label="Evidence records" value={`${summary.records} scans`} />
+        <PlanningRow label="Shell portfolio" value={topLabel(shellDistribution)} />
+        <PlanningRow label="Colour SKU leader" value={topLabel(colorDistribution)} />
+        <PlanningRow label="Size range leader" value={topLabel(sizeDistribution)} />
+        <PlanningRow label="Wheel platform" value={topLabel(wheelTypeDistribution)} />
+        <PlanningRow label="Hard-shell share" value={formatPercent(summary.hardShellShare)} />
+        <PlanningRow label="Avg volume" value={formatLiters(summary.avgVolumeLiters)} />
+      </div>
+    </ChartFrame>
   );
 }
 
@@ -1689,6 +1824,76 @@ function distributionFromRecords(
     .slice(0, 12);
 }
 
+type ManufacturingSummary = {
+  records: number;
+  hardShellCount: number;
+  hardShellShare: number | null;
+  avgVolumeLiters: number | null;
+};
+
+function summarizeManufacturingRecords(records: ManufacturingRecord[]): ManufacturingSummary {
+  const hardShellCount = records.filter(isHardShellRecord).length;
+  return {
+    records: records.length,
+    hardShellCount,
+    hardShellShare: ratio(hardShellCount, records.length),
+    avgVolumeLiters: averageNullableNumbers(records.map((record) => record.volumeLiters)),
+  };
+}
+
+function isHardShellRecord(record: ManufacturingRecord) {
+  const signal = [record.shellType, record.material].filter(Boolean).join(" ").toLowerCase();
+  return /hard|polycarbonate|abs|aluminium|aluminum/.test(signal);
+}
+
+function distributionFromManufacturingRecords(
+  records: ManufacturingRecord[],
+  key: keyof Pick<
+    ManufacturingRecord,
+    | "brandGuess"
+    | "bagType"
+    | "sizeClass"
+    | "shellType"
+    | "formFactor"
+    | "primaryColor"
+    | "material"
+    | "wheelCount"
+    | "wheelType"
+    | "overallCondition"
+  >,
+): DistributionItem[] {
+  const counts = new Map<string, number>();
+  for (const record of records) {
+    const label = dashboardLabelFromValue(record[key]);
+    counts.set(label, (counts.get(label) ?? 0) + 1);
+  }
+  return [...counts.entries()]
+    .map(([label, count]) => ({ label, count }))
+    .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label))
+    .slice(0, 12);
+}
+
+function lockDistributionFromManufacturingRecords(records: ManufacturingRecord[]) {
+  const counts = new Map<string, number>();
+  for (const record of records) {
+    if (record.lockSignals.length === 0) {
+      counts.set("not_visible", (counts.get("not_visible") ?? 0) + 1);
+      continue;
+    }
+    for (const signal of record.lockSignals) counts.set(signal, (counts.get(signal) ?? 0) + 1);
+  }
+  return [...counts.entries()]
+    .map(([label, count]) => ({ label, count }))
+    .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label))
+    .slice(0, 12);
+}
+
+function dashboardLabelFromValue(value: unknown) {
+  if (typeof value === "string" && value.trim()) return value.trim();
+  if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  return "unknown";
+}
+
 function flightRecordLabel(record: TravelRecord) {
   if (!record.flightNumber && !record.airline) return null;
   const flight = [record.airline, record.flightNumber].filter(Boolean).join(" ");
@@ -1855,6 +2060,8 @@ function isKnownLabel(value: string) {
     normalized !== "unknown" &&
     normalized !== "n/a" &&
     normalized !== "not captured" &&
+    normalized !== "not_visible" &&
+    normalized !== "not visible" &&
     !normalized.startsWith("unknown "),
   );
 }
@@ -1871,9 +2078,13 @@ function formatKg(value: number | null) {
   return value == null ? "n/a" : `${Math.round(value * 10) / 10} kg`;
 }
 
+function formatLiters(value: number | null) {
+  return value == null ? "n/a" : `${Math.round(value * 10) / 10} L`;
+}
+
 function formatLabel(value: string) {
   if (!value || value === "unknown") return "Unknown";
-  return value.replace(/_/g, " ");
+  return value.replace(/[_-]/g, " ");
 }
 
 function slugify(value: string) {
