@@ -797,7 +797,6 @@ function insurancePrescriptions(analytics: CloudAnalytics): Prescription[] {
 function manufacturingPrescriptions(analytics: CloudAnalytics): Prescription[] {
   const brand = topItem(analytics.brands);
   const type = topItem(analytics.formFactors.length ? analytics.formFactors : analytics.bagTypes);
-  const material = topItem(analytics.materials);
   const condition = topItem(analytics.conditions);
   return [
     {
@@ -1183,10 +1182,6 @@ function topItem(items: DistributionItem[]) {
 
 function formatPercent(value: number | null) {
   return value == null ? "n/a" : `${Math.round(value * 100)}%`;
-}
-
-function formatVolume(value: number | null) {
-  return value == null ? "n/a" : `${Math.round(value)} L`;
 }
 
 function formatCm(value: number | null) {
