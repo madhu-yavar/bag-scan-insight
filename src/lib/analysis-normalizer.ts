@@ -33,6 +33,12 @@ export type NormalizedScanAnalysis = {
   bagType: string | null;
   sizeClass: string | null;
   brandGuess: string | null;
+  brandConfidence: string | null;
+  visibleLogoText: string | null;
+  modelGuess: string | null;
+  modelConfidence: string | null;
+  shellType: string | null;
+  luggageFormFactor: string | null;
   widthCm: number | null;
   heightCm: number | null;
   depthCm: number | null;
@@ -76,7 +82,17 @@ export function normalizeScanAnalysis(analysis: unknown): NormalizedScanAnalysis
     summary: stringOrNull(root.summary),
     bagType: normalizedText(root.bag_type),
     sizeClass: normalizedText(root.size_class),
-    brandGuess: stringOrNull(root.brand_guess),
+    brandGuess: stringOrNull(root.brand_guess ?? toObject(root.brand)?.name),
+    brandConfidence: normalizedText(root.brand_confidence ?? toObject(root.brand)?.confidence),
+    visibleLogoText: stringOrNull(
+      root.visible_logo_text ?? toObject(root.brand)?.visible_logo_text,
+    ),
+    modelGuess: stringOrNull(root.model_guess ?? toObject(root.brand)?.model_guess),
+    modelConfidence: normalizedText(
+      root.model_confidence ?? toObject(root.brand)?.model_confidence,
+    ),
+    shellType: normalizedText(root.shell_type),
+    luggageFormFactor: normalizedText(root.luggage_form_factor),
     widthCm: numberOrNull(dimensions?.width),
     heightCm: numberOrNull(dimensions?.height),
     depthCm: numberOrNull(dimensions?.depth),

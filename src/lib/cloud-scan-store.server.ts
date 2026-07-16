@@ -19,12 +19,13 @@ import type { LocalScanDetail, ManualDimensionsCm, TravelContext } from "./local
 
 const PHOTO_BUCKET = "bagscan-photos";
 const SIGNED_URL_SECONDS = 60 * 60;
+const DEFAULT_ORG_ID = "11111111-1111-4111-8111-111111111111";
 
 type Row = Record<string, unknown>;
 const SESSION_SELECT =
-  "id,user_id,reference,notes,pnr,airline,flight_number,flight_date,departure_airport,arrival_airport,terminal,bag_tag,baggage_category,weight_kg,special_handling,status,model,manual_dimensions_json,approved_review_views,capture_validation_status,created_at,updated_at";
+  "id,org_id,user_id,reference,notes,pnr,airline,flight_number,flight_date,departure_airport,arrival_airport,terminal,bag_tag,baggage_category,baggage_category_source,weight_kg,special_handling,status,model,manual_dimensions_json,approved_review_views,capture_validation_status,created_at,updated_at";
 const ANALYTICS_SESSION_SELECT =
-  "id,status,pnr,airline,flight_number,flight_date,departure_airport,arrival_airport,terminal,bag_tag,baggage_category,weight_kg,special_handling,created_at";
+  "id,org_id,status,pnr,airline,flight_number,flight_date,departure_airport,arrival_airport,terminal,bag_tag,baggage_category,baggage_category_source,weight_kg,special_handling,created_at";
 
 export async function saveCloudScan(
   supabase: SupabaseClient,
@@ -34,6 +35,7 @@ export async function saveCloudScan(
   const scanId = randomUUID();
   const now = new Date().toISOString();
   const normalized = normalizeScanAnalysis(data.analysis);
+  const orgId = await ensureDefaultOrgMembership(supabase, userId);
   const uploadedPaths: string[] = [];
   const imageRows: Row[] = [];
 
@@ -52,6 +54,7 @@ export async function saveCloudScan(
       const metrics = normalized.imageMetrics[image.view];
       imageRows.push({
         scan_id: scanId,
+        org_id: orgId,
         user_id: userId,
         view: image.view,
         storage_bucket: PHOTO_BUCKET,
@@ -71,6 +74,7 @@ export async function saveCloudScan(
     const travel = normalizeTravelContext(data.travel_context);
     const sessionInsert = await supabase.from("bagscan_sessions").insert({
       id: scanId,
+      org_id: orgId,
       user_id: userId,
       reference: normalizeText(data.reference),
       notes: normalizeText(data.notes),
@@ -84,6 +88,7 @@ export async function saveCloudScan(
       terminal: travel?.terminal ?? null,
       bag_tag: travel?.bag_tag ?? null,
       baggage_category: travel?.baggage_category ?? null,
+      baggage_category_source: travel?.baggage_category_source ?? null,
       weight_kg: travel?.weight_kg ?? null,
       special_handling: travel?.special_handling ?? null,
       status,
@@ -107,11 +112,18 @@ export async function saveCloudScan(
     const dimensions = data.manual_dimensions_cm;
     const extractionInsert = await supabase.from("bagscan_extractions").insert({
       scan_id: scanId,
+      org_id: orgId,
       user_id: userId,
       summary: normalized.summary,
       bag_type: normalized.bagType,
       size_class: normalized.sizeClass,
       brand_guess: normalized.brandGuess,
+      brand_confidence: normalized.brandConfidence,
+      visible_logo_text: normalized.visibleLogoText,
+      model_guess: normalized.modelGuess,
+      model_confidence: normalized.modelConfidence,
+      shell_type: normalized.shellType,
+      luggage_form_factor: normalized.luggageFormFactor,
       width_cm: dimensions?.width ?? normalized.widthCm,
       height_cm: dimensions?.height ?? normalized.heightCm,
       depth_cm: dimensions?.depth ?? normalized.depthCm,
@@ -140,6 +152,7 @@ export async function saveCloudScan(
       const damageInsert = await supabase.from("bagscan_damage_findings").insert(
         normalized.damageFindings.map((item) => ({
           scan_id: scanId,
+          org_id: orgId,
           user_id: userId,
           location: item.location,
           damage_type: item.damageType,
@@ -157,6 +170,7 @@ export async function saveCloudScan(
       const eventInsert = await supabase.from("bagscan_validation_events").insert(
         normalized.validationEvents.map((event) => ({
           scan_id: scanId,
+          org_id: orgId,
           user_id: userId,
           view: event.view,
           event_type: event.eventType,
@@ -186,10 +200,10 @@ export async function listCloudScans(
   userId: string,
   limit: number,
 ): Promise<CloudScanSummary[]> {
+  await ensureDefaultOrgMembership(supabase, userId);
   const sessionsResult = await supabase
     .from("bagscan_sessions")
     .select(SESSION_SELECT)
-    .eq("user_id", userId)
     .order("created_at", { ascending: false })
     .limit(limit);
   if (sessionsResult.error)
@@ -217,11 +231,11 @@ export async function getCloudScan(
   userId: string,
   id: string,
 ): Promise<CloudScanDetail> {
+  await ensureDefaultOrgMembership(supabase, userId);
   const sessionResult = await supabase
     .from("bagscan_sessions")
     .select(SESSION_SELECT)
     .eq("id", id)
-    .eq("user_id", userId)
     .maybeSingle();
   if (sessionResult.error) throw new Error(`Could not load report: ${sessionResult.error.message}`);
   if (!sessionResult.data) throw new Error("Cloud scan not found.");
@@ -270,30 +284,21 @@ export async function getCloudAnalytics(
   supabase: SupabaseClient,
   userId: string,
 ): Promise<CloudAnalytics> {
+  await ensureDefaultOrgMembership(supabase, userId);
   const [sessionsResult, extractionsResult, imagesResult, damageResult, recentScans] =
     await Promise.all([
-      supabase
-        .from("bagscan_sessions")
-        .select(ANALYTICS_SESSION_SELECT)
-        .eq("user_id", userId)
-        .limit(5000),
+      supabase.from("bagscan_sessions").select(ANALYTICS_SESSION_SELECT).limit(5000),
       supabase
         .from("bagscan_extractions")
         .select(
-          "scan_id,bag_type,size_class,material,overall_condition,width_cm,height_cm,depth_cm,quality_score,identity_score,volume_liters",
+          "scan_id,org_id,bag_type,size_class,brand_guess,brand_confidence,visible_logo_text,model_guess,model_confidence,shell_type,luggage_form_factor,material,overall_condition,width_cm,height_cm,depth_cm,quality_score,identity_score,volume_liters",
         )
-        .eq("user_id", userId)
         .limit(5000),
       supabase
         .from("bagscan_images")
         .select("view,quality_score,identity_score,view_validation_status")
-        .eq("user_id", userId)
         .limit(20000),
-      supabase
-        .from("bagscan_damage_findings")
-        .select("severity")
-        .eq("user_id", userId)
-        .limit(10000),
+      supabase.from("bagscan_damage_findings").select("severity").limit(10000),
       listCloudScans(supabase, userId, 10),
     ]);
 
@@ -372,10 +377,24 @@ export async function getCloudAnalytics(
         allSessions.length,
       ),
     },
+    filterOptions: {
+      airlines: sortedUnique(travelRows.map((row) => row.airline)),
+      airports: sortedUnique(
+        travelRows.flatMap((row) => [row.departureAirport, row.arrivalAirport]),
+      ),
+      terminals: sortedUnique(travelRows.map((row) => terminalLabel(row))),
+      flightDates: sortedUnique(travelRows.map((row) => row.flightDate)),
+      baggageCategories: sortedUnique(travelRows.map((row) => row.baggageCategory)),
+    },
+    airlineLoads: groupedTravelLoads(travelRows, airlineLabel),
+    airportLoads: groupedTravelLoads(travelRows, airportLabel),
     flightLoads: groupedTravelLoads(travelRows, flightLabel),
     terminalLoads: groupedTravelLoads(travelRows, terminalLabel),
     pnrGroups: groupedTravelLoads(travelRows, pnrLabel),
     bagTypes: distribution(allExtractions, "bag_type"),
+    baggageCategories: distribution(allSessions, "baggage_category"),
+    brands: distribution(allExtractions, "brand_guess"),
+    formFactors: distribution(allExtractions, "luggage_form_factor"),
     sizeClasses: distribution(allExtractions, "size_class"),
     conditions: distribution(allExtractions, "overall_condition"),
     materials: distribution(allExtractions, "material"),
@@ -486,6 +505,13 @@ function localExtractionRow(detail: LocalScanDetail): Row {
     scan_id: detail.id,
     bag_type: detail.bagType ?? normalized.bagType,
     size_class: normalized.sizeClass,
+    brand_guess: normalized.brandGuess,
+    brand_confidence: normalized.brandConfidence,
+    visible_logo_text: normalized.visibleLogoText,
+    model_guess: normalized.modelGuess,
+    model_confidence: normalized.modelConfidence,
+    shell_type: normalized.shellType,
+    luggage_form_factor: normalized.luggageFormFactor,
     material: normalized.material,
     overall_condition: detail.overallCondition ?? normalized.overallCondition,
     width_cm: width,
@@ -536,6 +562,7 @@ function localScanToAnalyticsSummary(detail: LocalScanDetail): AnalyticsScanSumm
     summary: detail.summary,
     bagType: stringOrNull(extraction.bag_type),
     sizeClass: stringOrNull(extraction.size_class),
+    brandGuess: stringOrNull(extraction.brand_guess),
     overallCondition: stringOrNull(extraction.overall_condition),
     widthCm: numberField(extraction, "width_cm"),
     heightCm: numberField(extraction, "height_cm"),
@@ -650,6 +677,7 @@ function rowsToSummary(
     summary: stringOrNull(extraction?.summary),
     bagType: stringOrNull(extraction?.bag_type),
     sizeClass: stringOrNull(extraction?.size_class),
+    brandGuess: stringOrNull(extraction?.brand_guess),
     overallCondition: stringOrNull(extraction?.overall_condition),
     widthCm: dimensions?.width ?? numberField(extraction, "width_cm"),
     heightCm: dimensions?.height ?? numberField(extraction, "height_cm"),
@@ -796,6 +824,14 @@ function groupedTravelLoads(
     .slice(0, 8);
 }
 
+function airlineLabel(row: TravelAnalyticsRow) {
+  return row.airline || null;
+}
+
+function airportLabel(row: TravelAnalyticsRow) {
+  return row.departureAirport || row.arrivalAirport || null;
+}
+
 function flightLabel(row: TravelAnalyticsRow) {
   if (!row.flightNumber && !row.airline) return null;
   const flight = [row.airline, row.flightNumber].filter(Boolean).join(" ");
@@ -876,6 +912,7 @@ function normalizeTravelContext(value: TravelContext | null | undefined): Travel
     terminal: normalizeText(value.terminal ?? undefined),
     bag_tag: normalizeUpperText(value.bag_tag),
     baggage_category: normalizeText(value.baggage_category ?? undefined),
+    baggage_category_source: normalizeCategorySource(value.baggage_category_source),
     weight_kg: positiveNumber(value.weight_kg),
     special_handling: normalizeText(value.special_handling ?? undefined),
   };
@@ -893,6 +930,7 @@ function rowToTravelContext(row: Row): TravelContext | null {
     terminal: stringOrNull(row.terminal),
     bag_tag: stringOrNull(row.bag_tag),
     baggage_category: stringOrNull(row.baggage_category),
+    baggage_category_source: normalizeCategorySource(row.baggage_category_source),
     weight_kg: numberField(row, "weight_kg"),
     special_handling: stringOrNull(row.special_handling),
   });
@@ -973,6 +1011,31 @@ function uniqueCount(values: Array<string | null>) {
   return new Set(values.filter((value): value is string => Boolean(value))).size;
 }
 
+function sortedUnique(values: Array<string | null>) {
+  return [...new Set(values.filter((value): value is string => Boolean(value)))]
+    .sort((a, b) => a.localeCompare(b))
+    .slice(0, 100);
+}
+
 function isRow(value: unknown): value is Row {
   return value != null && typeof value === "object" && !Array.isArray(value);
+}
+
+function normalizeCategorySource(value: unknown): TravelContext["baggage_category_source"] {
+  return value === "manual" || value === "system" || value === "operator_override" ? value : null;
+}
+
+async function ensureDefaultOrgMembership(supabase: SupabaseClient, userId: string) {
+  const result = await supabase.from("bagscan_org_members").upsert(
+    {
+      org_id: DEFAULT_ORG_ID,
+      user_id: userId,
+      role: "operator",
+    },
+    { onConflict: "org_id,user_id", ignoreDuplicates: true },
+  );
+  if (result.error) {
+    throw new Error(`Could not initialize analytics organization: ${result.error.message}`);
+  }
+  return DEFAULT_ORG_ID;
 }

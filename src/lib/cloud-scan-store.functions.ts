@@ -29,6 +29,7 @@ const TravelContextSchema = z.object({
   terminal: z.string().optional().nullable(),
   bag_tag: z.string().optional().nullable(),
   baggage_category: z.string().optional().nullable(),
+  baggage_category_source: z.enum(["manual", "system", "operator_override"]).optional().nullable(),
   weight_kg: z.number().positive().optional().nullable(),
   special_handling: z.string().optional().nullable(),
 });
@@ -92,7 +93,15 @@ export const getCloudAnalytics = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
     const { getCloudAnalytics: getAnalytics } = await import("./cloud-scan-store.server");
-    return { analytics: await getAnalytics(context.supabase, context.userId) };
+    try {
+      return { analytics: await getAnalytics(context.supabase, context.userId) };
+    } catch (error) {
+      console.error("[BagScan] Dashboard analytics load failed", {
+        userId: context.userId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      throw error;
+    }
   });
 
 export const updateCloudScanApprovals = createServerFn({ method: "POST" })

@@ -28,6 +28,7 @@ const TravelContextSchema = z.object({
   terminal: z.string().optional().nullable(),
   bag_tag: z.string().optional().nullable(),
   baggage_category: z.string().optional().nullable(),
+  baggage_category_source: z.enum(["manual", "system", "operator_override"]).optional().nullable(),
   weight_kg: z.number().positive().optional().nullable(),
   special_handling: z.string().optional().nullable(),
 });

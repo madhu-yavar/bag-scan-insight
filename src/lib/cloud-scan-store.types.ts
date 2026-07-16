@@ -32,6 +32,7 @@ export type CloudScanSummary = {
   summary: string | null;
   bagType: string | null;
   sizeClass: string | null;
+  brandGuess: string | null;
   overallCondition: string | null;
   widthCm: number | null;
   heightCm: number | null;
@@ -122,6 +123,27 @@ export type CloudAnalytics = {
     avgWeightKg: number | null;
     pnrReadiness: number | null;
   };
+  filterOptions: {
+    airlines: string[];
+    airports: string[];
+    terminals: string[];
+    flightDates: string[];
+    baggageCategories: string[];
+  };
+  airlineLoads: Array<{
+    label: string;
+    count: number;
+    totalWeightKg: number | null;
+    oversizeCount: number;
+    highVolumeCount: number;
+  }>;
+  airportLoads: Array<{
+    label: string;
+    count: number;
+    totalWeightKg: number | null;
+    oversizeCount: number;
+    highVolumeCount: number;
+  }>;
   flightLoads: Array<{
     label: string;
     count: number;
@@ -144,6 +166,9 @@ export type CloudAnalytics = {
     highVolumeCount: number;
   }>;
   bagTypes: Array<{ label: string; count: number }>;
+  baggageCategories: Array<{ label: string; count: number }>;
+  brands: Array<{ label: string; count: number }>;
+  formFactors: Array<{ label: string; count: number }>;
   sizeClasses: Array<{ label: string; count: number }>;
   conditions: Array<{ label: string; count: number }>;
   materials: Array<{ label: string; count: number }>;

@@ -34,6 +34,7 @@ type ScanRow = {
   terminal: string | null;
   bag_tag: string | null;
   baggage_category: string | null;
+  baggage_category_source: string | null;
   weight_kg: number | null;
   special_handling: string | null;
   manual_dimensions_json: string | null;
@@ -90,10 +91,11 @@ export function saveScan(userId: string, data: SaveLocalScanData): LocalScanSumm
         `INSERT INTO scans (
           id, user_id, reference, notes, model, status, created_at, updated_at,
           pnr, airline, flight_number, flight_date, departure_airport, arrival_airport, terminal,
-          bag_tag, baggage_category, weight_kg, special_handling, manual_dimensions_json,
+          bag_tag, baggage_category, baggage_category_source, weight_kg, special_handling,
+          manual_dimensions_json,
           approved_review_views, analysis_json, capture_validation_status,
           summary, bag_type, overall_condition
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         id,
@@ -113,6 +115,7 @@ export function saveScan(userId: string, data: SaveLocalScanData): LocalScanSumm
         travel?.terminal ?? null,
         travel?.bag_tag ?? null,
         travel?.baggage_category ?? null,
+        travel?.baggage_category_source ?? null,
         travel?.weight_kg ?? null,
         travel?.special_handling ?? null,
         data.manual_dimensions_cm ? JSON.stringify(data.manual_dimensions_cm) : null,
@@ -262,6 +265,7 @@ function getDb() {
       terminal TEXT,
       bag_tag TEXT,
       baggage_category TEXT,
+      baggage_category_source TEXT,
       weight_kg REAL,
       special_handling TEXT,
       manual_dimensions_json TEXT,
@@ -296,6 +300,7 @@ function getDb() {
   ensureColumn(db, "scans", "terminal", "TEXT");
   ensureColumn(db, "scans", "bag_tag", "TEXT");
   ensureColumn(db, "scans", "baggage_category", "TEXT");
+  ensureColumn(db, "scans", "baggage_category_source", "TEXT");
   ensureColumn(db, "scans", "weight_kg", "REAL");
   ensureColumn(db, "scans", "special_handling", "TEXT");
   ensureColumn(db, "scans", "manual_dimensions_json", "TEXT");
@@ -365,6 +370,7 @@ function normalizeTravelContext(value: TravelContext | null | undefined): Travel
     terminal: normalizeText(value.terminal ?? undefined),
     bag_tag: normalizeUpperText(value.bag_tag),
     baggage_category: normalizeText(value.baggage_category ?? undefined),
+    baggage_category_source: normalizeCategorySource(value.baggage_category_source),
     weight_kg: positiveNumber(value.weight_kg),
     special_handling: normalizeText(value.special_handling ?? undefined),
   };
@@ -382,6 +388,8 @@ function rowToTravelContext(row: ScanRow): TravelContext | null {
     terminal: row.terminal,
     bag_tag: row.bag_tag,
     baggage_category: row.baggage_category,
+    baggage_category_source:
+      row.baggage_category_source as TravelContext["baggage_category_source"],
     weight_kg: row.weight_kg,
     special_handling: row.special_handling,
   });
@@ -427,4 +435,8 @@ function positiveNumber(value: unknown) {
     return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
   }
   return null;
+}
+
+function normalizeCategorySource(value: unknown): TravelContext["baggage_category_source"] {
+  return value === "manual" || value === "system" || value === "operator_override" ? value : null;
 }

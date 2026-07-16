@@ -51,7 +51,7 @@ export const Route = createFileRoute("/dashboard")({
 
 type DistributionItem = { label: string; count: number };
 type IconType = ComponentType<{ className?: string }>;
-type DashboardView = "operations" | "insurance" | "manufacturing" | "service";
+type DashboardView = "airline" | "airport" | "insurance" | "manufacturing" | "service";
 type Prescription = {
   title: string;
   detail: string;
@@ -65,7 +65,8 @@ const VIEWS: Array<{
   owner: string;
   icon: IconType;
 }> = [
-  { key: "operations", label: "Airline / Airport", owner: "Load and handling", icon: Plane },
+  { key: "airline", label: "Airline", owner: "Flight load planning", icon: Plane },
+  { key: "airport", label: "Airport", owner: "Terminal readiness", icon: Gauge },
   { key: "insurance", label: "Insurance", owner: "Claims evidence", icon: ClipboardCheck },
   { key: "manufacturing", label: "Manufacturer", owner: "Product quality", icon: Factory },
   { key: "service", label: "Customer Service", owner: "Passenger support", icon: Users },
@@ -178,7 +179,7 @@ function DashboardContent({
   refreshing: boolean;
   onRefresh: () => void;
 }) {
-  const [activeView, setActiveView] = useState<DashboardView>("operations");
+  const [activeView, setActiveView] = useState<DashboardView>("airline");
 
   return (
     <div className="space-y-6">
@@ -231,7 +232,7 @@ function RoleTabs({
   onChange: (view: DashboardView) => void;
 }) {
   return (
-    <div className="grid gap-2 rounded-2xl border bg-card p-2 shadow-elevated md:grid-cols-4">
+    <div className="grid gap-2 rounded-2xl border bg-card p-2 shadow-elevated md:grid-cols-5">
       {VIEWS.map((view) => {
         const active = view.key === activeView;
         const Icon = view.icon;
@@ -261,19 +262,45 @@ function RoleTabs({
 }
 
 function RolePanel({ view, analytics }: { view: DashboardView; analytics: CloudAnalytics }) {
-  if (view === "operations") return <OperationsView analytics={analytics} />;
+  if (view === "airline") return <AirlineView analytics={analytics} />;
+  if (view === "airport") return <AirportView analytics={analytics} />;
   if (view === "insurance") return <InsuranceView analytics={analytics} />;
   if (view === "manufacturing") return <ManufacturingView analytics={analytics} />;
   return <ServiceView analytics={analytics} />;
 }
 
-function OperationsView({ analytics }: { analytics: CloudAnalytics }) {
+function AirlineView({ analytics }: { analytics: CloudAnalytics }) {
+  const [airline, setAirline] = useState("all");
+  const [date, setDate] = useState("all");
+  const flightLoads = analytics.flightLoads.filter((item) => {
+    const label = item.label.toLowerCase();
+    const airlineMatch = airline === "all" || label.startsWith(airline.toLowerCase());
+    const dateMatch = date === "all" || label.includes(date.toLowerCase());
+    return airlineMatch && dateMatch;
+  });
+
   return (
     <section className="space-y-6">
       <RoleIntro
         icon={Plane}
-        title="Airline and airport operations"
-        description="Plan handling capacity, identify baggage exceptions, and prepare for route or belt load pressure."
+        title="Airline baggage planning"
+        description="Plan staff, gate readiness, internal transport, exception handling, and load advisory from PNR, flight, size, and weight signals."
+      />
+      <FilterBar
+        filters={[
+          {
+            label: "Airline",
+            value: airline,
+            onChange: setAirline,
+            options: analytics.filterOptions.airlines,
+          },
+          {
+            label: "Flight date",
+            value: date,
+            onChange: setDate,
+            options: analytics.filterOptions.flightDates,
+          },
+        ]}
       />
       <MetricGrid>
         <MetricCard
@@ -285,9 +312,78 @@ function OperationsView({ analytics }: { analytics: CloudAnalytics }) {
         />
         <MetricCard
           icon={Plane}
-          label="Flight groups"
-          value={analytics.travel.uniqueFlights}
-          helper={`${analytics.travel.uniqueAirlines} airlines in current data`}
+          label="Airline groups"
+          value={analytics.travel.uniqueAirlines}
+          helper={`${analytics.travel.uniqueFlights} flight groups in current data`}
+        />
+        <MetricCard
+          icon={BarChart3}
+          label="Baggage mix"
+          value={topLabel(analytics.baggageCategories)}
+          helper="Cabin, check-in, or special handling signal"
+        />
+        <MetricCard
+          icon={Gauge}
+          label="Captured weight"
+          value={formatKg(analytics.travel.totalWeightKg)}
+          helper={`${analytics.travel.weightedScans} bags with manual weight`}
+        />
+      </MetricGrid>
+      <PrescriptionPanel title="Airline prescriptions" items={airlinePrescriptions(analytics)} />
+      <div className="grid gap-6 lg:grid-cols-[0.9fr_1.1fr]">
+        <PlanningReadiness analytics={analytics} />
+        <TravelLoadPanel title="Flight baggage distribution" items={flightLoads} />
+        <TravelLoadPanel title="Airline distribution" items={analytics.airlineLoads} compact />
+        <DistributionPanel
+          title="Cabin vs check-in"
+          icon={Briefcase}
+          items={analytics.baggageCategories}
+          emptyLabel="No baggage category data yet"
+        />
+      </div>
+    </section>
+  );
+}
+
+function AirportView({ analytics }: { analytics: CloudAnalytics }) {
+  const [airport, setAirport] = useState("all");
+  const [terminal, setTerminal] = useState("all");
+  const terminalLoads = analytics.terminalLoads.filter((item) => {
+    const label = item.label.toLowerCase();
+    const airportMatch = airport === "all" || label.startsWith(airport.toLowerCase());
+    const terminalMatch = terminal === "all" || label.includes(terminal.toLowerCase());
+    return airportMatch && terminalMatch;
+  });
+
+  return (
+    <section className="space-y-6">
+      <RoleIntro
+        icon={Gauge}
+        title="Airport baggage readiness"
+        description="Prepare terminal capacity, baggage belts, screening queues, ground movement, and exception desks from airline and terminal-level baggage flow."
+      />
+      <FilterBar
+        filters={[
+          {
+            label: "Airport",
+            value: airport,
+            onChange: setAirport,
+            options: analytics.filterOptions.airports,
+          },
+          {
+            label: "Terminal",
+            value: terminal,
+            onChange: setTerminal,
+            options: analytics.filterOptions.terminals,
+          },
+        ]}
+      />
+      <MetricGrid>
+        <MetricCard
+          icon={Plane}
+          label="Airlines"
+          value={analytics.travel.uniqueAirlines}
+          helper={`${analytics.travel.uniqueFlights} flight groups represented`}
         />
         <MetricCard
           icon={TriangleAlert}
@@ -297,22 +393,25 @@ function OperationsView({ analytics }: { analytics: CloudAnalytics }) {
           tone="warning"
         />
         <MetricCard
-          icon={Gauge}
-          label="Captured weight"
-          value={formatKg(analytics.travel.totalWeightKg)}
-          helper={`${analytics.travel.weightedScans} bags with manual weight`}
+          icon={Briefcase}
+          label="Check-in pressure"
+          value={topLabel(analytics.baggageCategories)}
+          helper={`${analytics.totals.scans} scanned baggage records`}
+        />
+        <MetricCard
+          icon={Activity}
+          label="Planning readiness"
+          value={formatPercent(analytics.travel.pnrReadiness)}
+          helper="PNR, flight, and weight coverage"
         />
       </MetricGrid>
-      <PrescriptionPanel
-        title="Operations prescriptions"
-        items={operationsPrescriptions(analytics)}
-      />
+      <PrescriptionPanel title="Airport prescriptions" items={airportPrescriptions(analytics)} />
       <div className="grid gap-6 lg:grid-cols-[0.9fr_1.1fr]">
         <PlanningReadiness analytics={analytics} />
-        <TravelLoadPanel title="Flight baggage load" items={analytics.flightLoads} />
-        <TravelLoadPanel title="Terminal pressure" items={analytics.terminalLoads} compact />
+        <TravelLoadPanel title="Terminal pressure" items={terminalLoads} />
+        <TravelLoadPanel title="Airport distribution" items={analytics.airportLoads} compact />
         <DistributionPanel
-          title="Size class demand"
+          title="Size pressure"
           icon={Ruler}
           items={analytics.sizeClasses}
           emptyLabel="No size classes yet"
@@ -389,15 +488,15 @@ function ManufacturingView({ analytics }: { analytics: CloudAnalytics }) {
       <MetricGrid>
         <MetricCard
           icon={Briefcase}
-          label="Top baggage type"
-          value={topLabel(analytics.bagTypes)}
-          helper="Most common scanned category"
+          label="Top brand signal"
+          value={topLabel(analytics.brands)}
+          helper="Visible make or logo when detected"
         />
         <MetricCard
           icon={PackageSearch}
-          label="Top material"
-          value={topLabel(analytics.materials)}
-          helper="Most frequent material signal"
+          label="Top form factor"
+          value={topLabel(analytics.formFactors)}
+          helper="Spinner, duffel, carton, or other shape"
         />
         <MetricCard
           icon={Activity}
@@ -419,6 +518,18 @@ function ManufacturingView({ analytics }: { analytics: CloudAnalytics }) {
         items={manufacturingPrescriptions(analytics)}
       />
       <div className="grid gap-6 lg:grid-cols-2">
+        <DistributionPanel
+          title="Visible brand signals"
+          icon={Factory}
+          items={analytics.brands}
+          emptyLabel="No visible brand signals yet"
+        />
+        <DistributionPanel
+          title="Form factor mix"
+          icon={Briefcase}
+          items={analytics.formFactors}
+          emptyLabel="No form-factor data yet"
+        />
         <DistributionPanel
           title="Baggage type mix"
           icon={BarChart3}
@@ -517,6 +628,39 @@ function RoleIntro({
   );
 }
 
+function FilterBar({
+  filters,
+}: {
+  filters: Array<{
+    label: string;
+    value: string;
+    onChange: (value: string) => void;
+    options: string[];
+  }>;
+}) {
+  return (
+    <div className="grid gap-3 rounded-2xl border bg-card p-4 shadow-elevated md:grid-cols-2">
+      {filters.map((filter) => (
+        <label key={filter.label} className="grid gap-1.5 text-sm">
+          <span className="font-medium text-muted-foreground">{filter.label}</span>
+          <select
+            className="h-10 rounded-md border bg-background px-3 text-sm font-medium outline-none focus:border-primary"
+            value={filter.value}
+            onChange={(event) => filter.onChange(event.target.value)}
+          >
+            <option value="all">All</option>
+            {filter.options.map((option) => (
+              <option key={option} value={option}>
+                {formatLabel(option)}
+              </option>
+            ))}
+          </select>
+        </label>
+      ))}
+    </div>
+  );
+}
+
 function PrescriptionPanel({ title, items }: { title: string; items: Prescription[] }) {
   return (
     <section className="rounded-2xl border bg-card p-5 shadow-elevated">
@@ -543,7 +687,7 @@ function PrescriptionPanel({ title, items }: { title: string; items: Prescriptio
   );
 }
 
-function operationsPrescriptions(analytics: CloudAnalytics): Prescription[] {
+function airlinePrescriptions(analytics: CloudAnalytics): Prescription[] {
   const topFlight = analytics.flightLoads[0];
   return [
     topFlight
@@ -562,7 +706,7 @@ function operationsPrescriptions(analytics: CloudAnalytics): Prescription[] {
         },
     {
       title: "Watch exception baggage",
-      detail: `${analytics.operational.oversizeCandidates} oversize and ${analytics.operational.highVolumeCandidates} high-volume bags need handling attention.`,
+      detail: `${analytics.operational.oversizeCandidates} oversize and ${analytics.operational.highVolumeCandidates} high-volume bags may need gate, loading, or internal transport attention.`,
       tone:
         analytics.operational.oversizeCandidates > 0 ||
         analytics.operational.highVolumeCandidates > 0
@@ -570,11 +714,48 @@ function operationsPrescriptions(analytics: CloudAnalytics): Prescription[] {
           : "accent",
     },
     {
-      title: "Improve forecasting readiness",
+      title: "Improve load planning readiness",
       detail: `${formatPercent(
         analytics.travel.pnrReadiness,
-      )} of scans have PNR, flight, and weight. Push operators to fill those fields for reliable terminal planning.`,
+      )} of scans have PNR, flight, and weight. Fuel planning remains advisory until integrated with airline load-control data.`,
       tone: (analytics.travel.pnrReadiness ?? 0) >= 0.8 ? "accent" : "primary",
+    },
+  ];
+}
+
+function airportPrescriptions(analytics: CloudAnalytics): Prescription[] {
+  const topTerminal = analytics.terminalLoads[0];
+  return [
+    topTerminal
+      ? {
+          title: "Prepare terminal capacity",
+          detail: `${topTerminal.label} has ${topTerminal.count} scanned bags and ${
+            topTerminal.oversizeCount
+          } oversize candidates. Use this for belt, screening, and porter allocation.`,
+          tone: topTerminal.oversizeCount > 0 ? "warning" : "accent",
+        }
+      : {
+          title: "Capture airport context",
+          detail:
+            "Airport and terminal fields are missing. Operators should capture departure airport and terminal for infrastructure planning.",
+          tone: "warning",
+        },
+    {
+      title: "Balance airline peaks",
+      detail:
+        analytics.airlineLoads.length > 0
+          ? `${analytics.airlineLoads.length} airline groups are visible. Compare their baggage mix before assigning shared baggage belts and exception desks.`
+          : "Airline distribution is not available yet. Capture airline and flight number during scan.",
+      tone: analytics.airlineLoads.length > 0 ? "primary" : "warning",
+    },
+    {
+      title: "Stage exception handling",
+      detail: `${analytics.operational.oversizeCandidates} oversize and ${analytics.operational.highVolumeCandidates} high-volume bags should be planned before queue buildup.`,
+      tone:
+        analytics.operational.oversizeCandidates > 0 ||
+        analytics.operational.highVolumeCandidates > 0
+          ? "warning"
+          : "accent",
     },
   ];
 }
@@ -614,23 +795,24 @@ function insurancePrescriptions(analytics: CloudAnalytics): Prescription[] {
 }
 
 function manufacturingPrescriptions(analytics: CloudAnalytics): Prescription[] {
-  const type = topItem(analytics.bagTypes);
+  const brand = topItem(analytics.brands);
+  const type = topItem(analytics.formFactors.length ? analytics.formFactors : analytics.bagTypes);
   const material = topItem(analytics.materials);
   const condition = topItem(analytics.conditions);
   return [
     {
-      title: "Design around demand mix",
-      detail: type
-        ? `${formatLabel(type.label)} is the most scanned baggage type. Use this as the first product segment for size and durability analysis.`
-        : "Capture more baggage scans to establish demand mix by product type.",
-      tone: type ? "primary" : "warning",
+      title: "Track visible make",
+      detail: brand
+        ? `${formatLabel(brand.label)} is the strongest visible brand signal. Use this for portfolio and competitor benchmarking only when logo confidence is clear.`
+        : "No visible make is detected yet. Operators need clearer logo/text photos for manufacturer analytics.",
+      tone: brand ? "primary" : "warning",
     },
     {
-      title: "Track material performance",
-      detail: material
-        ? `${formatLabel(material.label)} is the leading material signal. Compare damage rate and condition trend for this material first.`
-        : "Material signals are not available yet. Improve scan quality or extraction coverage.",
-      tone: material ? "accent" : "warning",
+      title: "Segment product design",
+      detail: type
+        ? `${formatLabel(type.label)} is the leading form factor. Compare dimensions, material, and damage concentration for this segment.`
+        : "Form-factor mix is not mature yet. Capture more bags before design decisions.",
+      tone: type ? "accent" : "warning",
     },
     {
       title: "Review quality standard",

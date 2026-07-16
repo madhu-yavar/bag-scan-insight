@@ -58,6 +58,12 @@ Return STRICT, syntactically valid JSON only with this shape. Do not return mark
   "handles": ["top", "side", "telescopic"],
   "features": ["tsa-lock","expandable","external-pockets"],
   "brand_guess": "string|null",
+  "brand_confidence": "low|medium|high|null",
+  "visible_logo_text": "string|null",
+  "model_guess": "string|null",
+  "model_confidence": "low|medium|high|null",
+  "shell_type": "hard|soft|hybrid|carton|unknown",
+  "luggage_form_factor": "spinner-suitcase|inline-suitcase|duffel|backpack|carton|garment-bag|sports-equipment|other|unknown",
   "damage": [{ "location": "string", "type": "scuff|dent|tear|stain|crack|missing-part|other", "severity": "minor|moderate|severe", "description": "string" }],
   "overall_condition": "excellent|good|fair|poor|unknown",
   "capture_quality": { "front": "good|fair|poor", "back": "good|fair|poor", "top": "good|fair|poor", "side": "good|fair|poor" },
@@ -77,6 +83,9 @@ Validation rules:
 - identity_consistency.conflicting_slots must list submitted slots that appear to belong to a different bag or cannot be reconciled with the reference views.
 - identity_consistency.recommended_retake_slots must list the minimum slots the operator should retake to restore one-bag consistency.
 - capture_quality should summarize the submitted slots, not the inferred actual view.
+- brand_guess must be based on visible logo, printed text, distinctive model marks, or a clearly recognizable design. Use null when the brand is not visible. Do not infer brand from color or generic shape alone.
+- visible_logo_text should contain exact visible text when readable, for example "VIP" or "Urban Jungle"; otherwise use null.
+- model_guess should be null unless model text or a very distinctive model line is visible.
 
 If dimensions cannot be estimated because the required views are not usable or do not show the same bag, use null values and explain the limitation in dimensions_cm.basis or notes.`;
 

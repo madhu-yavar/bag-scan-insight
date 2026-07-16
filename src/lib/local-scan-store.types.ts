@@ -21,6 +21,7 @@ export type TravelContext = {
   terminal?: string | null;
   bag_tag?: string | null;
   baggage_category?: string | null;
+  baggage_category_source?: "manual" | "system" | "operator_override" | null;
   weight_kg?: number | null;
   special_handling?: string | null;
 };

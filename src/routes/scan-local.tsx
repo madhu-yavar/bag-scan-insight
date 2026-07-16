@@ -67,7 +67,11 @@ export const Route = createFileRoute("/scan-local")({
 
 type ImageMap = Partial<Record<BaggageView, string>>;
 type JsonObject = Record<string, unknown>;
-type TravelContextForm = Record<Exclude<keyof TravelContext, "weight_kg">, string> & {
+type TravelContextForm = Record<
+  Exclude<keyof TravelContext, "weight_kg" | "baggage_category_source">,
+  string
+> & {
+  baggage_category_source: NonNullable<TravelContext["baggage_category_source"]> | "";
   weight_kg: string;
 };
 const MODEL = "gemini-3.5-flash";
@@ -84,6 +88,7 @@ const EMPTY_TRAVEL_CONTEXT: TravelContextForm = {
   terminal: "",
   bag_tag: "",
   baggage_category: "",
+  baggage_category_source: "",
   weight_kg: "",
   special_handling: "",
 };
@@ -235,12 +240,14 @@ function LocalScanPage() {
       if (status === "needs_retake") toast.warning("Retake needed");
       else if (status === "needs_review") toast.warning("Review capture");
       else toast.success("Baggage profile ready");
+      const completedTravelContext = withBaggageCategorySuggestion(travelContext, result.analysis);
+      setTravelContext(completedTravelContext);
 
       const savePayload = {
         reference: name,
         notes,
         model: MODEL,
-        travel_context: compactTravelContext(travelContext),
+        travel_context: compactTravelContext(completedTravelContext),
         approved_review_views: approvedViews,
         images: VIEWS.map((view) => ({
           view: view.key,
@@ -498,15 +505,28 @@ function LocalScanPage() {
                       updateTravelField(setTravelContext, "arrival_airport", value)
                     }
                   />
-                  <TextField
-                    id="travel-category"
-                    label="Baggage category"
-                    placeholder="Checked-in, cabin, special"
-                    value={travelContext.baggage_category}
-                    onChange={(value) =>
-                      updateTravelField(setTravelContext, "baggage_category", value)
-                    }
-                  />
+                  <div className="grid gap-1.5">
+                    <Label htmlFor="travel-category">Baggage category</Label>
+                    <Input
+                      id="travel-category"
+                      placeholder="Auto after scan, or enter cabin / check-in / special"
+                      value={travelContext.baggage_category}
+                      onChange={(event) =>
+                        setTravelContext((current) => ({
+                          ...current,
+                          baggage_category: event.target.value,
+                          baggage_category_source: event.target.value.trim()
+                            ? "operator_override"
+                            : "",
+                        }))
+                      }
+                    />
+                    <div className="text-xs text-muted-foreground">
+                      {travelContext.baggage_category_source === "system"
+                        ? "Suggested from detected dimensions. Edit it if the airline rule differs."
+                        : "Leave blank to suggest cabin or check-in from detected dimensions."}
+                    </div>
+                  </div>
                   <TextField
                     id="travel-weight"
                     label="Weight kg"
@@ -1335,7 +1355,49 @@ function updateTravelField(
   setTravelContext((current) => ({ ...current, [field]: value }));
 }
 
+function withBaggageCategorySuggestion(
+  form: TravelContextForm,
+  analysis: unknown,
+): TravelContextForm {
+  if (form.baggage_category.trim()) {
+    return { ...form, baggage_category_source: "operator_override" };
+  }
+
+  const suggestion = suggestBaggageCategory(analysis);
+  if (!suggestion) return form;
+  return {
+    ...form,
+    baggage_category: suggestion,
+    baggage_category_source: "system",
+  };
+}
+
+function suggestBaggageCategory(analysis: unknown) {
+  const item = toObject(analysis);
+  if (!item) return null;
+
+  const formFactor = String(item.luggage_form_factor ?? item.bag_type ?? "").toLowerCase();
+  if (
+    formFactor.includes("carton") ||
+    formFactor.includes("garment") ||
+    formFactor.includes("sports")
+  ) {
+    return "special";
+  }
+
+  const dimensions = toObject(item.dimensions_cm);
+  const width = positiveNumberValue(dimensions?.width);
+  const height = positiveNumberValue(dimensions?.height);
+  const depth = positiveNumberValue(dimensions?.depth);
+  if (width == null || height == null || depth == null) return null;
+
+  const linear = width + height + depth;
+  const cabinCandidate = linear <= 115 && height <= 56 && width <= 45 && depth <= 25;
+  return cabinCandidate ? "cabin" : "check-in";
+}
+
 function compactTravelContext(form: TravelContextForm): TravelContext | null {
+  const category = textOrNull(form.baggage_category);
   const context: TravelContext = {
     pnr: textOrNull(form.pnr),
     airline: textOrNull(form.airline),
@@ -1345,7 +1407,8 @@ function compactTravelContext(form: TravelContextForm): TravelContext | null {
     arrival_airport: textOrNull(form.arrival_airport),
     terminal: textOrNull(form.terminal),
     bag_tag: textOrNull(form.bag_tag),
-    baggage_category: textOrNull(form.baggage_category),
+    baggage_category: category,
+    baggage_category_source: category ? form.baggage_category_source || "operator_override" : null,
     weight_kg: positiveNumberOrNull(form.weight_kg),
     special_handling: textOrNull(form.special_handling),
   };
@@ -1362,6 +1425,15 @@ function positiveNumberOrNull(value: string) {
   if (!trimmed) return null;
   const parsed = Number(trimmed);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
+function positiveNumberValue(value: unknown) {
+  if (typeof value === "number" && Number.isFinite(value) && value > 0) return value;
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+  }
+  return null;
 }
 
 function slugify(value: string) {
