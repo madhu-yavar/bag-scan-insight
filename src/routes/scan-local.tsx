@@ -1,11 +1,13 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, useRouter } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
 import {
+  useEffect,
   useMemo,
   useRef,
   useState,
   type ComponentProps,
   type Dispatch,
+  type ReactNode,
   type SetStateAction,
 } from "react";
 import {
@@ -14,12 +16,12 @@ import {
   Database,
   Download,
   ExternalLink,
-  Loader2,
-  Sparkles,
+  LogOut,
+  Plane,
 } from "lucide-react";
 import { toast } from "sonner";
+import type { User } from "@supabase/supabase-js";
 
-import { AppHeader } from "@/components/AppHeader";
 import {
   BaggageCapture,
   type BaggageCaptureHandle,
@@ -29,6 +31,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { hasSupabaseConfig, supabase } from "@/integrations/supabase/client";
 import { requireSignedIn } from "@/lib/auth-helpers";
 import { VIEWS, type BaggageView } from "@/lib/baggage-views";
 import {
@@ -395,18 +398,23 @@ function LocalScanPage() {
   };
 
   return (
-    <div className="min-h-screen bg-background">
-      <AppHeader />
-      <main className="mx-auto max-w-6xl px-4 py-8 sm:px-6 sm:py-12">
-        <div className="mb-8 flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+    <div className="min-h-screen bg-background text-foreground" style={cockpitBackgroundStyle}>
+      <ScanOpsNav />
+      <main className="mx-auto max-w-[1360px] px-4 py-7 sm:px-8">
+        <div className="mb-6 grid gap-5 lg:grid-cols-[1fr_auto] lg:items-center">
           <div>
-            <h1 className="text-3xl font-bold sm:text-4xl">New baggage scan</h1>
-            <p className="mt-2 max-w-2xl text-muted-foreground">
-              Capture the required views and generate a baggage profile for review.
+            <h1 className="text-[28px] font-bold leading-tight tracking-[-0.01em] text-foreground">
+              New baggage scan{" "}
+              <span className="font-normal text-muted-foreground">· Station 04</span>
+            </h1>
+            <p className="mt-1 text-[13px] text-muted-foreground">
+              Capture the required views and generate a verified baggage profile.
             </p>
           </div>
-          <div className="rounded-xl border bg-surface-elevated px-4 py-3 text-sm text-muted-foreground">
-            <span className="font-semibold text-foreground">{capturedCount}/4</span> views captured
+          <div className="grid grid-cols-3 gap-3 sm:flex">
+            <HudPill label="Views" value={`${capturedCount} / ${VIEWS.length}`} />
+            <HudPill label="Status" value={submitting ? "Scan" : "Live"} />
+            <HudPill label="Terminal" value={travelContext.terminal.trim() || "BS-09"} />
           </div>
         </div>
 
@@ -419,212 +427,210 @@ function LocalScanPage() {
             activeView={activeView}
             onActiveViewChange={setActiveView}
             viewStatuses={viewStatuses}
+            asideActions={
+              <>
+                <ScanActionButton
+                  variant="primary"
+                  disabled={!allCaptured || submitting}
+                  onClick={analyze}
+                >
+                  {submitting
+                    ? "Scanning"
+                    : !allCaptured
+                      ? `Need ${VIEWS.length - capturedCount} views`
+                      : "Generate profile"}
+                </ScanActionButton>
+                <ScanActionButton disabled={!analysis} onClick={exportReport}>
+                  Export report
+                </ScanActionButton>
+                <ScanActionLink>Saved reports</ScanActionLink>
+              </>
+            }
           />
         </div>
 
-        <div className="mt-10 grid gap-6 lg:grid-cols-[1fr_360px]">
-          <section className="rounded-3xl border bg-card p-6 shadow-elevated">
-            <h2 className="text-lg font-semibold">Baggage details</h2>
-            <div className="mt-4 grid gap-4">
+        <section className="mt-6 rounded-[14px] border bg-card p-5">
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+            <div className="md:col-span-2 xl:col-span-3">
+              <TextField
+                id="local-name"
+                label="Reference"
+                placeholder="e.g. BAG-1042"
+                value={name}
+                onChange={setName}
+              />
+            </div>
+            <TextField
+              id="travel-pnr"
+              label="PNR"
+              placeholder="e.g. Y7K9Q2"
+              value={travelContext.pnr}
+              onChange={(value) => updateTravelField(setTravelContext, "pnr", value)}
+            />
+            <TextField
+              id="travel-bag-tag"
+              label="Bag tag"
+              placeholder="e.g. 0987654321"
+              value={travelContext.bag_tag}
+              onChange={(value) => updateTravelField(setTravelContext, "bag_tag", value)}
+            />
+            <TextField
+              id="travel-airline"
+              label="Airline"
+              placeholder="e.g. IndiGo"
+              value={travelContext.airline}
+              onChange={(value) => updateTravelField(setTravelContext, "airline", value)}
+            />
+            <TextField
+              id="travel-flight"
+              label="Flight number"
+              placeholder="e.g. 6E204"
+              value={travelContext.flight_number}
+              onChange={(value) => updateTravelField(setTravelContext, "flight_number", value)}
+            />
+            <TextField
+              id="travel-date"
+              label="Flight date"
+              type="date"
+              value={travelContext.flight_date}
+              onChange={(value) => updateTravelField(setTravelContext, "flight_date", value)}
+            />
+            <TextField
+              id="travel-terminal"
+              label="Terminal"
+              placeholder="e.g. T2"
+              value={travelContext.terminal}
+              onChange={(value) => updateTravelField(setTravelContext, "terminal", value)}
+            />
+            <TextField
+              id="travel-departure"
+              label="Departure airport"
+              placeholder="e.g. BLR"
+              value={travelContext.departure_airport}
+              onChange={(value) => updateTravelField(setTravelContext, "departure_airport", value)}
+            />
+            <TextField
+              id="travel-arrival"
+              label="Arrival airport"
+              placeholder="e.g. DEL"
+              value={travelContext.arrival_airport}
+              onChange={(value) => updateTravelField(setTravelContext, "arrival_airport", value)}
+            />
+            <div className="md:col-span-2">
               <div className="grid gap-1.5">
-                <Label htmlFor="local-name">Reference</Label>
+                <Label
+                  htmlFor="travel-category"
+                  className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground"
+                >
+                  Baggage category
+                </Label>
                 <Input
-                  id="local-name"
-                  placeholder="e.g. BAG-1042"
-                  value={name}
-                  onChange={(event) => setName(event.target.value)}
+                  id="travel-category"
+                  className={cockpitInputClass}
+                  placeholder="Auto after scan, or enter cabin / check-in"
+                  value={travelContext.baggage_category}
+                  onChange={(event) =>
+                    setTravelContext((current) => ({
+                      ...current,
+                      baggage_category: event.target.value,
+                      baggage_category_source: event.target.value.trim() ? "operator_override" : "",
+                    }))
+                  }
+                />
+                <div className="font-mono text-[10px] text-muted-foreground">
+                  {travelContext.baggage_category_source === "system"
+                    ? "Suggested from dimensions. Operator can override."
+                    : "Leave blank to suggest cabin or check-in from detected dimensions."}
+                </div>
+              </div>
+            </div>
+            <TextField
+              id="travel-weight"
+              label="Weight kg"
+              inputMode="decimal"
+              placeholder="e.g. 18.5"
+              value={travelContext.weight_kg}
+              onChange={(value) => updateTravelField(setTravelContext, "weight_kg", value)}
+            />
+            <div className="md:col-span-2 xl:col-span-3">
+              <div className="grid gap-1.5">
+                <Label
+                  htmlFor="travel-special-handling"
+                  className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground"
+                >
+                  Special handling
+                </Label>
+                <Textarea
+                  id="travel-special-handling"
+                  className={cockpitTextareaClass}
+                  placeholder="Fragile, wheelchair support, priority handling, or claim notes"
+                  value={travelContext.special_handling}
+                  onChange={(event) =>
+                    updateTravelField(setTravelContext, "special_handling", event.target.value)
+                  }
                 />
               </div>
-              <div className="rounded-2xl border bg-surface-elevated p-4">
-                <div>
-                  <h3 className="text-sm font-semibold">Trip context</h3>
-                  <p className="mt-1 text-xs leading-5 text-muted-foreground">
-                    Add PNR and flight details to power airline, airport, and terminal planning.
-                  </p>
-                </div>
-                <div className="mt-4 grid gap-4 sm:grid-cols-2">
-                  <TextField
-                    id="travel-pnr"
-                    label="PNR"
-                    placeholder="e.g. Y7K9Q2"
-                    value={travelContext.pnr}
-                    onChange={(value) => updateTravelField(setTravelContext, "pnr", value)}
-                  />
-                  <TextField
-                    id="travel-bag-tag"
-                    label="Bag tag"
-                    placeholder="e.g. 0987654321"
-                    value={travelContext.bag_tag}
-                    onChange={(value) => updateTravelField(setTravelContext, "bag_tag", value)}
-                  />
-                  <TextField
-                    id="travel-airline"
-                    label="Airline"
-                    placeholder="e.g. IndiGo"
-                    value={travelContext.airline}
-                    onChange={(value) => updateTravelField(setTravelContext, "airline", value)}
-                  />
-                  <TextField
-                    id="travel-flight"
-                    label="Flight number"
-                    placeholder="e.g. 6E204"
-                    value={travelContext.flight_number}
-                    onChange={(value) =>
-                      updateTravelField(setTravelContext, "flight_number", value)
-                    }
-                  />
-                  <TextField
-                    id="travel-date"
-                    label="Flight date"
-                    type="date"
-                    value={travelContext.flight_date}
-                    onChange={(value) => updateTravelField(setTravelContext, "flight_date", value)}
-                  />
-                  <TextField
-                    id="travel-terminal"
-                    label="Terminal"
-                    placeholder="e.g. T2"
-                    value={travelContext.terminal}
-                    onChange={(value) => updateTravelField(setTravelContext, "terminal", value)}
-                  />
-                  <TextField
-                    id="travel-departure"
-                    label="Departure airport"
-                    placeholder="e.g. BLR"
-                    value={travelContext.departure_airport}
-                    onChange={(value) =>
-                      updateTravelField(setTravelContext, "departure_airport", value)
-                    }
-                  />
-                  <TextField
-                    id="travel-arrival"
-                    label="Arrival airport"
-                    placeholder="e.g. DEL"
-                    value={travelContext.arrival_airport}
-                    onChange={(value) =>
-                      updateTravelField(setTravelContext, "arrival_airport", value)
-                    }
-                  />
-                  <div className="grid gap-1.5">
-                    <Label htmlFor="travel-category">Baggage category</Label>
-                    <Input
-                      id="travel-category"
-                      placeholder="Auto after scan, or enter cabin / check-in / special"
-                      value={travelContext.baggage_category}
-                      onChange={(event) =>
-                        setTravelContext((current) => ({
-                          ...current,
-                          baggage_category: event.target.value,
-                          baggage_category_source: event.target.value.trim()
-                            ? "operator_override"
-                            : "",
-                        }))
-                      }
-                    />
-                    <div className="text-xs text-muted-foreground">
-                      {travelContext.baggage_category_source === "system"
-                        ? "Suggested from detected dimensions. Edit it if the airline rule differs."
-                        : "Leave blank to suggest cabin or check-in from detected dimensions."}
-                    </div>
-                  </div>
-                  <TextField
-                    id="travel-weight"
-                    label="Weight kg"
-                    inputMode="decimal"
-                    placeholder="e.g. 18.5"
-                    value={travelContext.weight_kg}
-                    onChange={(value) => updateTravelField(setTravelContext, "weight_kg", value)}
-                  />
-                  <div className="grid gap-1.5 sm:col-span-2">
-                    <Label htmlFor="travel-special-handling">Special handling</Label>
-                    <Textarea
-                      id="travel-special-handling"
-                      placeholder="Fragile, wheelchair support, priority handling, or claim notes"
-                      value={travelContext.special_handling}
-                      onChange={(event) =>
-                        updateTravelField(setTravelContext, "special_handling", event.target.value)
-                      }
-                    />
-                  </div>
-                </div>
-              </div>
+            </div>
+            <div className="md:col-span-2 xl:col-span-3">
               <div className="grid gap-1.5">
-                <Label htmlFor="local-notes">Notes</Label>
+                <Label
+                  htmlFor="local-notes"
+                  className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground"
+                >
+                  Operator notes
+                </Label>
                 <Textarea
                   id="local-notes"
-                  placeholder="Tag number, visible marks, or handling notes"
+                  className={cockpitTextareaClass}
+                  placeholder="Visible marks, handling notes, or exception context"
                   value={notes}
                   onChange={(event) => setNotes(event.target.value)}
                 />
               </div>
             </div>
-          </section>
+          </div>
 
-          <section className="rounded-3xl border bg-card p-6 shadow-elevated">
-            {savedScan ? (
-              <div className="mb-4 rounded-xl border border-accent/35 bg-accent/10 p-3 text-sm">
-                <div className="flex items-start gap-2">
-                  <Database className="mt-0.5 h-4 w-4 shrink-0 text-accent" />
-                  <div className="min-w-0">
-                    <div className="font-semibold text-foreground">Saved</div>
-                    <div className="mt-0.5 truncate text-xs text-muted-foreground">
-                      {savedScan.id}
-                    </div>
+          {savedScan ? (
+            <div className="mt-4 flex flex-col gap-3 rounded-[10px] border border-primary/30 bg-primary/10 p-3 text-sm sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex min-w-0 items-center gap-2">
+                <Database className="h-4 w-4 shrink-0 text-primary" />
+                <div className="min-w-0">
+                  <div className="font-mono text-[10px] uppercase tracking-[0.16em] text-primary">
+                    Saved profile
                   </div>
+                  <div className="truncate text-xs text-muted-foreground">{savedScan.id}</div>
                 </div>
-                <Button className="mt-3 w-full" size="sm" variant="outline" asChild>
-                  <Link to="/reports-local/$id" params={{ id: savedScan.id }}>
-                    <ExternalLink className="mr-2 h-4 w-4" />
-                    Open saved report
-                  </Link>
-                </Button>
               </div>
-            ) : null}
-
-            <Button
-              className="w-full bg-gradient-brand text-primary-foreground shadow-brand hover:opacity-95"
-              disabled={!allCaptured || submitting}
-              onClick={analyze}
-            >
-              {submitting ? (
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              ) : (
-                <Sparkles className="mr-2 h-4 w-4" />
-              )}
-              {submitting
-                ? "Scanning..."
-                : !allCaptured
-                  ? `Capture all 4 views (${capturedCount}/4)`
-                  : "Scan baggage"}
-            </Button>
-
-            <Button
-              className="mt-3 w-full"
-              variant="outline"
-              disabled={!analysis}
-              onClick={exportReport}
-            >
-              <Download className="mr-2 h-4 w-4" />
-              Export report
-            </Button>
-
-            <Button className="mt-3 w-full" variant="ghost" asChild>
-              <Link to="/reports-local">
-                <Database className="mr-2 h-4 w-4" />
-                Saved reports
-              </Link>
-            </Button>
-          </section>
-        </div>
+              <Button
+                className="h-9 rounded-[10px] border border-primary/40 bg-transparent px-3 font-mono text-[10px] uppercase tracking-[0.14em] text-primary hover:bg-primary/10"
+                variant="outline"
+                asChild
+              >
+                <Link to="/reports-local/$id" params={{ id: savedScan.id }}>
+                  <ExternalLink className="mr-2 h-4 w-4" />
+                  Open report
+                </Link>
+              </Button>
+            </div>
+          ) : null}
+        </section>
 
         {analysis ? (
-          <section className="mt-8 rounded-3xl border bg-card p-6 shadow-elevated">
+          <section className="mt-6 rounded-[14px] border bg-card p-5">
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
               <div>
-                <h2 className="text-xl font-semibold">Baggage profile</h2>
-                <p className="text-sm text-muted-foreground">Review the detected attributes.</p>
+                <h2 className="font-mono text-[12px] font-semibold uppercase tracking-[0.18em] text-primary">
+                  Baggage profile
+                </h2>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Review the detected attributes and capture quality.
+                </p>
               </div>
-              <Button variant="outline" onClick={exportReport}>
+              <Button
+                className="h-9 rounded-[10px] border border-primary/40 bg-transparent px-3 font-mono text-[10px] uppercase tracking-[0.14em] text-primary hover:bg-primary/10"
+                variant="outline"
+                onClick={exportReport}
+              >
                 <Download className="mr-2 h-4 w-4" />
                 Export report
               </Button>
@@ -639,6 +645,121 @@ function LocalScanPage() {
         ) : null}
       </main>
     </div>
+  );
+}
+
+const cockpitInputClass =
+  "h-10 rounded-lg border-border bg-surface-2 px-3 text-sm text-foreground placeholder:text-muted-foreground/70 focus-visible:border-primary focus-visible:ring-primary/20";
+
+const cockpitTextareaClass =
+  "min-h-20 rounded-lg border-border bg-surface-2 px-3 py-3 text-sm text-foreground placeholder:text-muted-foreground/70 focus-visible:border-primary focus-visible:ring-primary/20";
+
+const cockpitBackgroundStyle = {
+  background:
+    "radial-gradient(1000px 500px at 20% -10%, rgba(56,189,248,.12), transparent 60%), radial-gradient(700px 400px at 100% 100%, rgba(245,158,11,.08), transparent 60%), var(--color-background)",
+};
+
+function ScanOpsNav() {
+  const [user, setUser] = useState<User | null>(null);
+  const router = useRouter();
+  const supabaseConfigured = hasSupabaseConfig();
+
+  useEffect(() => {
+    if (!supabaseConfigured) return;
+
+    supabase.auth.getUser().then(({ data }) => setUser(data.user ?? null));
+    const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUser(session?.user ?? null);
+    });
+    return () => sub.subscription.unsubscribe();
+  }, [supabaseConfigured]);
+
+  const signOut = async () => {
+    if (supabaseConfigured) await supabase.auth.signOut();
+    router.navigate({ to: "/" });
+  };
+
+  return (
+    <header className="border-b bg-background/80">
+      <div className="mx-auto flex min-h-[52px] max-w-[1440px] flex-wrap items-center justify-between gap-4 px-4 py-3 sm:px-8">
+        <Link
+          to="/scan-local"
+          className="flex items-center gap-3 font-mono text-[13px] font-bold uppercase tracking-[0.12em] text-foreground"
+        >
+          <Plane className="h-4 w-4 text-primary" />
+          <span>BAGSCAN OPS</span>
+        </Link>
+
+        <nav className="order-3 flex w-full items-center gap-7 overflow-x-auto font-mono text-[11px] uppercase tracking-[0.22em] text-muted-foreground sm:order-none sm:w-auto">
+          <Link to="/scan-local" className="shrink-0 text-primary">
+            New scan
+          </Link>
+          <Link to="/reports-local" className="shrink-0 hover:text-primary">
+            Saved reports
+          </Link>
+          <Link to="/dashboard" className="shrink-0 hover:text-primary">
+            Dashboard
+          </Link>
+        </nav>
+
+        <div className="flex items-center gap-3">
+          <span className="hidden max-w-[220px] truncate font-mono text-[11px] text-muted-foreground sm:block">
+            {user?.email ?? "operator"}
+          </span>
+          <button
+            type="button"
+            onClick={signOut}
+            className="inline-flex h-8 items-center gap-2 rounded-md px-2 font-mono text-[11px] text-muted-foreground hover:text-primary"
+          >
+            <LogOut className="h-3.5 w-3.5" />
+            Logout
+          </button>
+        </div>
+      </div>
+    </header>
+  );
+}
+
+function HudPill({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="min-w-0 rounded-[10px] border bg-card px-4 py-3">
+      <div className="font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
+        {label}
+      </div>
+      <div className="mt-1 truncate font-mono text-base text-primary">{value}</div>
+    </div>
+  );
+}
+
+function ScanActionButton({
+  variant = "secondary",
+  className = "",
+  children,
+  ...props
+}: ComponentProps<"button"> & { variant?: "primary" | "secondary" }) {
+  return (
+    <button
+      type="button"
+      className={`rounded-[10px] border px-3 py-3 font-mono text-[11px] font-bold uppercase tracking-[0.16em] transition disabled:cursor-not-allowed disabled:opacity-45 ${
+        variant === "primary"
+          ? "border-transparent bg-primary text-primary-foreground hover:bg-primary/90"
+          : "border-border bg-surface-2 text-foreground hover:border-primary/60 hover:text-primary"
+      } ${className}`}
+      {...props}
+    >
+      {children}
+    </button>
+  );
+}
+
+function ScanActionLink({ children }: { children: ReactNode }) {
+  return (
+    <Link
+      to="/reports-local"
+      className="rounded-[10px] border border-border bg-surface-2 px-3 py-3 text-center font-mono text-[11px] font-bold uppercase tracking-[0.16em] text-foreground transition hover:border-primary/60 hover:text-primary"
+    >
+      {children}
+    </Link>
   );
 }
 
@@ -661,11 +782,17 @@ function TextField({
 }) {
   return (
     <div className="grid gap-1.5">
-      <Label htmlFor={id}>{label}</Label>
+      <Label
+        htmlFor={id}
+        className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground"
+      >
+        {label}
+      </Label>
       <Input
         id={id}
         type={type}
         inputMode={inputMode}
+        className={cockpitInputClass}
         placeholder={placeholder}
         value={value}
         onChange={(event) => onChange(event.target.value)}

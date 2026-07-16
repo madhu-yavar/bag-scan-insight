@@ -1,4 +1,4 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, useRouter } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
 import {
   Activity,
@@ -28,9 +28,10 @@ import {
   type ComponentType,
   type ReactNode,
 } from "react";
+import type { User } from "@supabase/supabase-js";
 
-import { AppHeader } from "@/components/AppHeader";
 import { Button } from "@/components/ui/button";
+import { hasSupabaseConfig, supabase } from "@/integrations/supabase/client";
 import { requireSignedIn } from "@/lib/auth-helpers";
 import { getCloudAnalytics, type CloudAnalytics } from "@/lib/cloud-scan-store.functions";
 
@@ -59,8 +60,8 @@ type TravelLoadItem = CloudAnalytics["flightLoads"][number];
 type AirlineFilters = {
   airline: string;
   date: string;
-  flight: string;
-  category: string;
+  airport: string;
+  terminal: string;
 };
 type TravelRecordSummary = {
   scans: number;
@@ -169,27 +170,101 @@ function DashboardPage() {
   }, [refreshAnalytics]);
 
   return (
-    <div className="min-h-screen bg-background">
-      <AppHeader />
-      <main className="mx-auto max-w-7xl px-4 py-8 sm:px-6 sm:py-10">
-        {loading ? (
-          <div className="mt-24 flex justify-center">
-            <Loader2 className="h-6 w-6 animate-spin text-primary" />
-          </div>
-        ) : error ? (
-          <div className="mt-8 rounded-2xl border border-destructive/35 bg-destructive/10 p-5 text-sm text-destructive">
-            {error}
-          </div>
-        ) : analytics ? (
-          <DashboardContent
-            analytics={analytics}
-            lastUpdatedAt={lastUpdatedAt}
-            refreshing={refreshing}
-            onRefresh={() => void refreshAnalytics(false)}
-          />
-        ) : null}
+    <div className="dark min-h-screen bg-background text-foreground">
+      <DashboardTopNav />
+      <main className="min-h-[calc(100vh-56px)] bg-background">
+        <div className="mx-auto max-w-[1440px] px-4 py-6 sm:px-8">
+          {loading ? (
+            <div className="mt-24 flex justify-center">
+              <Loader2 className="h-6 w-6 animate-spin text-primary" />
+            </div>
+          ) : error ? (
+            <div className="mt-8 rounded-md border border-destructive/40 bg-card p-4 text-sm text-destructive">
+              {error}
+            </div>
+          ) : analytics ? (
+            <DashboardContent
+              analytics={analytics}
+              lastUpdatedAt={lastUpdatedAt}
+              refreshing={refreshing}
+              onRefresh={() => void refreshAnalytics(false)}
+            />
+          ) : null}
+        </div>
       </main>
     </div>
+  );
+}
+
+function DashboardTopNav() {
+  const [user, setUser] = useState<User | null>(null);
+  const router = useRouter();
+
+  useEffect(() => {
+    if (!hasSupabaseConfig()) return;
+    supabase.auth.getUser().then(({ data }) => setUser(data.user ?? null));
+    const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUser(session?.user ?? null);
+    });
+    return () => sub.subscription.unsubscribe();
+  }, []);
+
+  const signOut = async () => {
+    await supabase.auth.signOut();
+    router.navigate({ to: "/" });
+  };
+
+  return (
+    <header className="h-14 border-b border-border bg-background">
+      <div className="mx-auto flex h-full max-w-[1440px] items-center justify-between px-4 sm:px-8">
+        <Link to="/dashboard" className="flex items-center gap-3">
+          <div className="grid h-5 w-5 place-items-center rounded-sm border border-primary text-primary">
+            <span className="h-2 w-2 rounded-[2px] border border-primary" />
+          </div>
+          <span className="text-base font-semibold text-foreground">BagScan</span>
+        </Link>
+        <nav className="hidden h-full items-center gap-8 md:flex">
+          <Link
+            to="/dashboard"
+            className="relative flex h-full items-center text-[13px] font-medium uppercase tracking-wide text-primary"
+          >
+            Dashboard
+            <span className="absolute inset-x-0 bottom-0 h-0.5 bg-primary" />
+          </Link>
+          <Link
+            to="/scan-local"
+            className="flex h-full items-center text-[13px] font-medium uppercase tracking-wide text-muted-foreground transition-colors hover:text-foreground"
+          >
+            New scan
+          </Link>
+          <Link
+            to="/reports-local"
+            className="flex h-full items-center text-[13px] font-medium uppercase tracking-wide text-muted-foreground transition-colors hover:text-foreground"
+          >
+            Saved reports
+          </Link>
+        </nav>
+        <div className="flex items-center gap-3 text-[13px] text-muted-foreground">
+          <Link
+            to="/scan-local"
+            className="inline-flex h-9 items-center rounded-md border border-primary px-3 text-[13px] font-medium uppercase tracking-[0.08em] text-primary transition-colors hover:bg-surface-2 md:hidden"
+          >
+            New scan
+          </Link>
+          <span className="hidden max-w-[180px] truncate sm:inline">
+            {user?.email ?? "ops@bagscan.com"}
+          </span>
+          <span className="hidden h-5 w-px bg-border sm:block" />
+          <button
+            className="transition-colors hover:text-foreground"
+            type="button"
+            onClick={signOut}
+          >
+            Logout
+          </button>
+        </div>
+      </div>
+    </header>
   );
 }
 
@@ -207,21 +282,22 @@ function DashboardContent({
   const [activeView, setActiveView] = useState<DashboardView>("airline");
 
   return (
-    <div className="space-y-6">
-      <header className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-        <div>
-          <div className="text-sm font-medium text-primary">BagScan analytics</div>
-          <h1 className="mt-1 font-display text-3xl font-extrabold sm:text-4xl">
-            BagScan Intelligence Console
-          </h1>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
+    <div className="space-y-8">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+        <RoleTabs activeView={activeView} onChange={setActiveView} />
+        <div className="flex shrink-0 flex-wrap items-center gap-3">
           {lastUpdatedAt ? (
-            <span className="text-xs text-muted-foreground">
-              Updated {formatTime(lastUpdatedAt)}
+            <span className="text-[12px] text-muted-foreground">
+              Data refreshed {formatTime(lastUpdatedAt)}
             </span>
           ) : null}
-          <Button variant="outline" onClick={onRefresh} disabled={refreshing}>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-9 rounded-md border-border bg-transparent text-[13px] text-foreground hover:border-secondary hover:bg-surface-2"
+            onClick={onRefresh}
+            disabled={refreshing}
+          >
             {refreshing ? (
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
             ) : (
@@ -229,16 +305,8 @@ function DashboardContent({
             )}
             Refresh
           </Button>
-          <Button className="bg-gradient-brand text-primary-foreground shadow-brand" asChild>
-            <Link to="/scan-local">
-              <Camera className="mr-2 h-4 w-4" />
-              New scan
-            </Link>
-          </Button>
         </div>
-      </header>
-
-      <RoleTabs activeView={activeView} onChange={setActiveView} />
+      </div>
 
       {analytics.totals.scans === 0 ? (
         <EmptyState />
@@ -257,26 +325,28 @@ function RoleTabs({
   onChange: (view: DashboardView) => void;
 }) {
   return (
-    <div className="grid gap-2 rounded-2xl border bg-card p-2 shadow-elevated md:grid-cols-5">
+    <div className="grid gap-1 rounded-md border border-border bg-card p-1 md:grid-cols-5">
       {VIEWS.map((view) => {
         const active = view.key === activeView;
         const Icon = view.icon;
         return (
           <button
             key={view.key}
-            className={`rounded-xl px-4 py-3 text-left transition ${
+            className={`rounded-md px-3 py-2 text-left transition-colors duration-150 ${
               active
-                ? "bg-primary text-primary-foreground shadow-brand"
-                : "text-muted-foreground hover:bg-secondary hover:text-foreground"
+                ? "bg-surface-2 text-foreground ring-1 ring-primary/60"
+                : "text-muted-foreground hover:bg-surface-2 hover:text-foreground"
             }`}
             type="button"
             onClick={() => onChange(view.key)}
           >
             <div className="flex items-center gap-2">
-              <Icon className="h-4 w-4" />
-              <span className="font-semibold">{view.label}</span>
+              <Icon className="h-3.5 w-3.5 text-primary" />
+              <span className="text-[13px] font-medium">{view.label}</span>
             </div>
-            <div className={`mt-1 text-xs ${active ? "text-primary-foreground/80" : ""}`}>
+            <div
+              className={`mt-0.5 text-[11px] ${active ? "text-muted-foreground" : "text-muted-foreground/70"}`}
+            >
               {view.owner}
             </div>
           </button>
@@ -297,59 +367,59 @@ function RolePanel({ view, analytics }: { view: DashboardView; analytics: CloudA
 function AirlineView({ analytics }: { analytics: CloudAnalytics }) {
   const [airline, setAirline] = useState("all");
   const [date, setDate] = useState("all");
-  const [flight, setFlight] = useState("all");
-  const [category, setCategory] = useState("all");
+  const [airport, setAirport] = useState("all");
+  const [terminal, setTerminal] = useState("all");
   const filters = useMemo(
-    () => ({ airline, date, flight, category }),
-    [airline, category, date, flight],
+    () => ({ airline, date, airport, terminal }),
+    [airline, airport, date, terminal],
   );
   const scopedRecords = useMemo(
     () => filterTravelRecords(analytics.travelRecords, filters),
     [analytics.travelRecords, filters],
-  );
-  const availableFlights = useMemo(
-    () =>
-      sortedUniqueStrings(
-        filterTravelRecords(analytics.travelRecords, {
-          airline,
-          date,
-          flight: "all",
-          category,
-        }).map((record) => record.flightNumber),
-      ),
-    [airline, analytics.travelRecords, category, date],
   );
   const scopedSummary = useMemo(() => summarizeTravelRecords(scopedRecords), [scopedRecords]);
   const flightLoads = useMemo(
     () => groupedRecordLoads(scopedRecords, flightRecordLabel),
     [scopedRecords],
   );
-  const pnrLoads = useMemo(
-    () => groupedRecordLoads(scopedRecords, pnrRecordLabel),
+  const airportLoads = useMemo(
+    () => groupedRecordLoads(scopedRecords, airportRecordLabel),
+    [scopedRecords],
+  );
+  const terminalLoads = useMemo(
+    () => groupedRecordLoads(scopedRecords, terminalRecordLabel),
     [scopedRecords],
   );
   const categoryDistribution = useMemo(
     () => distributionFromRecords(scopedRecords, "baggageCategory"),
     [scopedRecords],
   );
-  const sizeDistribution = useMemo(
-    () => distributionFromRecords(scopedRecords, "sizeClass"),
-    [scopedRecords],
-  );
-
-  useEffect(() => {
-    if (flight !== "all" && !availableFlights.includes(flight)) setFlight("all");
-  }, [availableFlights, flight]);
-
   return (
     <section className="space-y-6">
       <RoleIntro
         icon={Plane}
         title="Airline baggage planning"
-        description="Plan staff, gate readiness, internal transport, exception handling, and load advisory from PNR, flight, size, and weight signals."
+        description="Plan baggage load by flight, airport, terminal, category, size, and captured weight."
+        action={
+          <Button
+            variant="outline"
+            className="h-9 rounded-md border-border bg-transparent px-3 text-[13px] font-medium uppercase tracking-[0.08em] text-foreground hover:border-secondary hover:bg-surface-2"
+            onClick={() => downloadAirlineReport(scopedRecords, filters)}
+            disabled={scopedRecords.length === 0}
+          >
+            <Download className="mr-2 h-3.5 w-3.5 text-primary" />
+            Download report
+          </Button>
+        }
       />
       <FilterBar
         filters={[
+          {
+            label: "Date",
+            value: date,
+            onChange: setDate,
+            options: analytics.filterOptions.flightDates,
+          },
           {
             label: "Airline",
             value: airline,
@@ -357,49 +427,38 @@ function AirlineView({ analytics }: { analytics: CloudAnalytics }) {
             options: analytics.filterOptions.airlines,
           },
           {
-            label: "Flight date",
-            value: date,
-            onChange: setDate,
-            options: analytics.filterOptions.flightDates,
+            label: "Airport",
+            value: airport,
+            onChange: setAirport,
+            options: analytics.filterOptions.airports,
           },
           {
-            label: "Flight number",
-            value: flight,
-            onChange: setFlight,
-            options: availableFlights,
-          },
-          {
-            label: "Baggage category",
-            value: category,
-            onChange: setCategory,
-            options: analytics.filterOptions.baggageCategories,
+            label: "Terminal",
+            value: terminal,
+            onChange: setTerminal,
+            options: analytics.filterOptions.terminals,
           },
         ]}
-      />
-      <ReportActionBar
-        count={scopedRecords.length}
-        label={airlineScopeLabel(filters)}
-        onDownload={() => downloadAirlineReport(scopedRecords, filters)}
       />
       <MetricGrid>
         <MetricCard
           icon={Briefcase}
-          label="PNR-linked bags"
-          value={scopedSummary.pnrLinkedScans}
-          helper={`${scopedSummary.uniquePnrs} PNR groups in selected data`}
+          label="Scope coverage"
+          value={scopedSummary.scans}
+          helper={`${scopedSummary.pnrLinkedScans} PNR-linked records`}
           tone="accent"
         />
         <MetricCard
           icon={Plane}
-          label="Flight groups"
+          label="Flights planned"
           value={scopedSummary.uniqueFlights}
           helper={`${scopedSummary.uniqueAirlines} airlines in selected data`}
         />
         <MetricCard
           icon={BarChart3}
-          label="Baggage mix"
-          value={topLabel(categoryDistribution)}
-          helper={`${scopedSummary.oversizeCandidates} oversize, ${scopedSummary.highVolumeCandidates} high-volume`}
+          label="Bags captured"
+          value={scopedSummary.scans}
+          helper={`${topLabel(categoryDistribution)} is the leading category`}
         />
         <MetricCard
           icon={Gauge}
@@ -408,26 +467,17 @@ function AirlineView({ analytics }: { analytics: CloudAnalytics }) {
           helper={`${scopedSummary.weightedScans} bags with manual weight`}
         />
       </MetricGrid>
+      <div className="grid gap-6 lg:grid-cols-[0.9fr_1.1fr]">
+        <AirlinePlanningReadiness summary={scopedSummary} />
+        <FlightDistributionPanel title="Flight baggage distribution" items={flightLoads} />
+      </div>
       <PrescriptionPanel
         title="Airline prescriptions"
         items={airlinePrescriptions(scopedSummary, flightLoads, filters)}
       />
-      <div className="grid gap-6 lg:grid-cols-[0.9fr_1.1fr]">
-        <AirlinePlanningReadiness summary={scopedSummary} />
-        <TravelLoadPanel title="Flight baggage distribution" items={flightLoads} />
-        <TravelLoadPanel title="PNR baggage groups" items={pnrLoads} compact />
-        <DistributionPanel
-          title="Cabin vs check-in"
-          icon={Briefcase}
-          items={categoryDistribution}
-          emptyLabel="No baggage category data yet"
-        />
-        <DistributionPanel
-          title="Size pressure"
-          icon={Ruler}
-          items={sizeDistribution}
-          emptyLabel="No size data in selected scope"
-        />
+      <div className="grid gap-6 lg:grid-cols-2">
+        <AirportDistributionPanel items={airportLoads} />
+        <TerminalPressurePanel items={terminalLoads} />
       </div>
     </section>
   );
@@ -436,12 +486,35 @@ function AirlineView({ analytics }: { analytics: CloudAnalytics }) {
 function AirportView({ analytics }: { analytics: CloudAnalytics }) {
   const [airport, setAirport] = useState("all");
   const [terminal, setTerminal] = useState("all");
-  const terminalLoads = analytics.terminalLoads.filter((item) => {
-    const label = item.label.toLowerCase();
-    const airportMatch = airport === "all" || label.startsWith(airport.toLowerCase());
-    const terminalMatch = terminal === "all" || label.includes(terminal.toLowerCase());
-    return airportMatch && terminalMatch;
-  });
+  const airportRecords = useMemo(
+    () =>
+      analytics.travelRecords.filter((record) => {
+        const airportMatch =
+          airport === "all" ||
+          record.departureAirport === airport ||
+          record.arrivalAirport === airport;
+        const terminalMatch = terminal === "all" || record.terminal === terminal;
+        return airportMatch && terminalMatch;
+      }),
+    [airport, analytics.travelRecords, terminal],
+  );
+  const airportSummary = useMemo(() => summarizeTravelRecords(airportRecords), [airportRecords]);
+  const airportLoads = useMemo(
+    () => groupedRecordLoads(airportRecords, airportRecordLabel),
+    [airportRecords],
+  );
+  const terminalLoads = useMemo(
+    () => groupedRecordLoads(airportRecords, terminalRecordLabel),
+    [airportRecords],
+  );
+  const airportCategories = useMemo(
+    () => distributionFromRecords(airportRecords, "baggageCategory"),
+    [airportRecords],
+  );
+  const airportSizeClasses = useMemo(
+    () => distributionFromRecords(airportRecords, "sizeClass"),
+    [airportRecords],
+  );
 
   return (
     <section className="space-y-6">
@@ -470,38 +543,43 @@ function AirportView({ analytics }: { analytics: CloudAnalytics }) {
         <MetricCard
           icon={Plane}
           label="Airlines"
-          value={analytics.travel.uniqueAirlines}
-          helper={`${analytics.travel.uniqueFlights} flight groups represented`}
+          value={airportSummary.uniqueAirlines}
+          helper={`${airportSummary.uniqueFlights} flight groups represented`}
         />
         <MetricCard
           icon={TriangleAlert}
           label="Oversize candidates"
-          value={analytics.operational.oversizeCandidates}
-          helper={`${formatCm(analytics.operational.avgLinearCm)} average linear size`}
+          value={airportSummary.oversizeCandidates}
+          helper={`${formatCm(airportSummary.avgLinearCm)} average linear size`}
           tone="warning"
         />
         <MetricCard
           icon={Briefcase}
           label="Check-in pressure"
-          value={topLabel(analytics.baggageCategories)}
-          helper={`${analytics.totals.scans} scanned baggage records`}
+          value={topLabel(airportCategories)}
+          helper={`${airportSummary.scans} scanned baggage records`}
         />
         <MetricCard
           icon={Activity}
           label="Planning readiness"
-          value={formatPercent(analytics.travel.pnrReadiness)}
+          value={formatPercent(airportSummary.pnrReadiness)}
           helper="PNR, flight, and weight coverage"
         />
       </MetricGrid>
-      <PrescriptionPanel title="Airport prescriptions" items={airportPrescriptions(analytics)} />
       <div className="grid gap-6 lg:grid-cols-[0.9fr_1.1fr]">
-        <PlanningReadiness analytics={analytics} />
-        <TravelLoadPanel title="Terminal pressure" items={terminalLoads} />
-        <TravelLoadPanel title="Airport distribution" items={analytics.airportLoads} compact />
-        <DistributionPanel
+        <PlanningReadiness summary={airportSummary} />
+        <TerminalPressurePanel items={terminalLoads} />
+      </div>
+      <PrescriptionPanel
+        title="Airport prescriptions"
+        items={airportPrescriptions(airportSummary, terminalLoads, airportLoads)}
+      />
+      <div className="grid gap-6 lg:grid-cols-2">
+        <AirportDistributionPanel items={airportLoads} />
+        <DistributionBarPanel
           title="Size pressure"
           icon={Ruler}
-          items={analytics.sizeClasses}
+          items={airportSizeClasses}
           emptyLabel="No size classes yet"
         />
       </div>
@@ -545,15 +623,14 @@ function InsuranceView({ analytics }: { analytics: CloudAnalytics }) {
           helper="Captured image records"
         />
       </MetricGrid>
-      <PrescriptionPanel title="Claims prescriptions" items={insurancePrescriptions(analytics)} />
       <div className="grid gap-6 lg:grid-cols-3">
-        <DistributionPanel
+        <DistributionDonutPanel
           title="Damage severity"
           icon={TriangleAlert}
           items={analytics.damageSeverity}
           emptyLabel="No damage recorded"
         />
-        <DistributionPanel
+        <DistributionBarPanel
           title="Condition at scan"
           icon={Activity}
           items={analytics.conditions}
@@ -561,6 +638,7 @@ function InsuranceView({ analytics }: { analytics: CloudAnalytics }) {
         />
         <QualityPanel analytics={analytics} />
       </div>
+      <PrescriptionPanel title="Claims prescriptions" items={insurancePrescriptions(analytics)} />
     </section>
   );
 }
@@ -576,15 +654,17 @@ function ManufacturingView({ analytics }: { analytics: CloudAnalytics }) {
       <MetricGrid>
         <MetricCard
           icon={Briefcase}
-          label="Top brand signal"
-          value={topLabel(analytics.brands)}
-          helper="Visible make or logo when detected"
+          label="Detected brands"
+          value={knownItemCount(analytics.brands)}
+          helper="Visible make or logo only"
         />
         <MetricCard
           icon={PackageSearch}
-          label="Top form factor"
-          value={topLabel(analytics.formFactors)}
-          helper="Spinner, duffel, carton, or other shape"
+          label="Product types"
+          value={knownItemCount(
+            analytics.formFactors.length ? analytics.formFactors : analytics.bagTypes,
+          )}
+          helper="Classified baggage shapes"
         />
         <MetricCard
           icon={Activity}
@@ -601,42 +681,44 @@ function ManufacturingView({ analytics }: { analytics: CloudAnalytics }) {
           tone="warning"
         />
       </MetricGrid>
-      <PrescriptionPanel
-        title="Manufacturing prescriptions"
-        items={manufacturingPrescriptions(analytics)}
-      />
       <div className="grid gap-6 lg:grid-cols-2">
-        <DistributionPanel
+        <DistributionBarPanel
           title="Visible brand signals"
           icon={Factory}
           items={analytics.brands}
           emptyLabel="No visible brand signals yet"
         />
-        <DistributionPanel
+        <DistributionDonutPanel
           title="Form factor mix"
           icon={Briefcase}
           items={analytics.formFactors}
           emptyLabel="No form-factor data yet"
         />
-        <DistributionPanel
+        <DistributionBarPanel
           title="Baggage type mix"
           icon={BarChart3}
           items={analytics.bagTypes}
           emptyLabel="No baggage types yet"
         />
-        <DistributionPanel
+        <DistributionBarPanel
           title="Material mix"
           icon={PackageSearch}
           items={analytics.materials}
           emptyLabel="No materials yet"
         />
-        <DistributionPanel
+      </div>
+      <PrescriptionPanel
+        title="Manufacturing prescriptions"
+        items={manufacturingPrescriptions(analytics)}
+      />
+      <div className="grid gap-6 lg:grid-cols-2">
+        <DistributionBarPanel
           title="Condition trend"
           icon={Activity}
           items={analytics.conditions}
           emptyLabel="No condition data yet"
         />
-        <DistributionPanel
+        <DistributionDonutPanel
           title="Damage severity"
           icon={TriangleAlert}
           items={analytics.damageSeverity}
@@ -683,11 +765,11 @@ function ServiceView({ analytics }: { analytics: CloudAnalytics }) {
           helper="Available customer-facing proof"
         />
       </MetricGrid>
-      <PrescriptionPanel title="Service prescriptions" items={servicePrescriptions(analytics)} />
       <div className="grid gap-6 lg:grid-cols-[0.9fr_1.1fr]">
         <QualityPanel analytics={analytics} />
         <RecentScans scans={analytics.recentScans} />
       </div>
+      <PrescriptionPanel title="Service prescriptions" items={servicePrescriptions(analytics)} />
     </section>
   );
 }
@@ -696,23 +778,28 @@ function RoleIntro({
   icon: Icon,
   title,
   description,
+  action,
 }: {
   icon: IconType;
   title: string;
   description: string;
+  action?: ReactNode;
 }) {
   return (
-    <div className="rounded-2xl border bg-card p-5 shadow-elevated">
-      <div className="flex items-start gap-3">
-        <div className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-primary/10 text-primary">
-          <Icon className="h-5 w-5" />
+    <header className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
+      <div className="flex items-center gap-6">
+        <div className="grid h-20 w-20 shrink-0 place-items-center rounded-full border border-primary/45 bg-transparent text-primary">
+          <Icon className="h-10 w-10" />
         </div>
         <div>
-          <h2 className="text-xl font-bold">{title}</h2>
-          <p className="mt-1 max-w-3xl text-sm leading-6 text-muted-foreground">{description}</p>
+          <h1 className="font-sans text-2xl font-semibold leading-8 tracking-normal text-foreground">
+            {title}
+          </h1>
+          <p className="mt-1 text-[13px] leading-5 text-muted-foreground">{description}</p>
         </div>
       </div>
-    </div>
+      {action ? <div className="shrink-0">{action}</div> : null}
+    </header>
   );
 }
 
@@ -727,12 +814,14 @@ function FilterBar({
   }>;
 }) {
   return (
-    <div className="grid gap-3 rounded-2xl border bg-card p-4 shadow-elevated md:grid-cols-2">
+    <div className="grid gap-4 rounded-md border border-border bg-card p-4 md:grid-cols-2 xl:grid-cols-5">
       {filters.map((filter) => (
-        <label key={filter.label} className="grid gap-1.5 text-sm">
-          <span className="font-medium text-muted-foreground">{filter.label}</span>
+        <label key={filter.label} className="grid gap-2">
+          <span className="text-[11px] font-medium uppercase leading-4 tracking-[0.1em] text-muted-foreground">
+            {filter.label}
+          </span>
           <select
-            className="h-10 rounded-md border bg-background px-3 text-sm font-medium outline-none focus:border-primary"
+            className="h-9 rounded-md border border-border bg-surface-2 px-3 text-[13px] text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-primary/20"
             value={filter.value}
             onChange={(event) => filter.onChange(event.target.value)}
           >
@@ -749,48 +838,27 @@ function FilterBar({
   );
 }
 
-function ReportActionBar({
-  count,
-  label,
-  onDownload,
-}: {
-  count: number;
-  label: string;
-  onDownload: () => void;
-}) {
-  return (
-    <div className="flex flex-col gap-3 rounded-2xl border bg-card p-4 shadow-elevated sm:flex-row sm:items-center sm:justify-between">
-      <div>
-        <div className="text-sm font-semibold">{label}</div>
-        <div className="mt-1 text-xs text-muted-foreground">
-          {count} baggage records in the selected airline planning scope.
-        </div>
-      </div>
-      <Button variant="outline" onClick={onDownload} disabled={count === 0}>
-        <Download className="mr-2 h-4 w-4" />
-        Download report
-      </Button>
-    </div>
-  );
-}
-
 function PrescriptionPanel({ title, items }: { title: string; items: Prescription[] }) {
   return (
-    <section className="rounded-2xl border bg-card p-5 shadow-elevated">
+    <section className="rounded-md border border-border bg-card p-6">
       <div className="flex items-center justify-between gap-3">
-        <h3 className="font-bold">{title}</h3>
-        <div className="grid h-9 w-9 place-items-center rounded-xl bg-accent/12 text-accent">
-          <ClipboardCheck className="h-4 w-4" />
+        <h3 className="text-sm font-semibold uppercase leading-5 tracking-[0.08em] text-primary">
+          {title}
+        </h3>
+        <div className="grid h-6 w-6 place-items-center rounded-md border border-success/30 bg-success/15 text-success">
+          <ClipboardCheck className="h-3.5 w-3.5" />
         </div>
       </div>
-      <div className="mt-5 grid gap-3 md:grid-cols-3">
+      <div className="mt-5 grid gap-0 md:grid-cols-3 md:divide-x md:divide-border">
         {items.map((item) => (
-          <div key={item.title} className="rounded-xl bg-surface-elevated p-4">
+          <div key={item.title} className="px-6 py-1 first:pl-0 last:pr-0">
             <div className="flex items-start gap-3">
-              <div className={`mt-0.5 h-2.5 w-2.5 shrink-0 rounded-full ${dotTone(item.tone)}`} />
+              <div className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${dotTone(item.tone)}`} />
               <div>
-                <div className="text-sm font-semibold">{item.title}</div>
-                <p className="mt-1 text-xs leading-5 text-muted-foreground">{item.detail}</p>
+                <div className="text-sm font-semibold uppercase tracking-wide text-foreground">
+                  {item.title}
+                </div>
+                <p className="mt-2 text-[13px] leading-5 text-muted-foreground">{item.detail}</p>
               </div>
             </div>
           </div>
@@ -838,8 +906,12 @@ function airlinePrescriptions(
   ];
 }
 
-function airportPrescriptions(analytics: CloudAnalytics): Prescription[] {
-  const topTerminal = analytics.terminalLoads[0];
+function airportPrescriptions(
+  summary: TravelRecordSummary,
+  terminalLoads: TravelLoadItem[],
+  airportLoads: TravelLoadItem[],
+): Prescription[] {
+  const topTerminal = terminalLoads[0];
   return [
     topTerminal
       ? {
@@ -858,19 +930,16 @@ function airportPrescriptions(analytics: CloudAnalytics): Prescription[] {
     {
       title: "Balance airline peaks",
       detail:
-        analytics.airlineLoads.length > 0
-          ? `${analytics.airlineLoads.length} airline groups are visible. Compare their baggage mix before assigning shared baggage belts and exception desks.`
+        airportLoads.length > 0
+          ? `${airportLoads.length} airport groups are visible. Compare their baggage mix before assigning shared baggage belts and exception desks.`
           : "Airline distribution is not available yet. Capture airline and flight number during scan.",
-      tone: analytics.airlineLoads.length > 0 ? "primary" : "warning",
+      tone: airportLoads.length > 0 ? "primary" : "warning",
     },
     {
       title: "Stage exception handling",
-      detail: `${analytics.operational.oversizeCandidates} oversize and ${analytics.operational.highVolumeCandidates} high-volume bags should be planned before queue buildup.`,
+      detail: `${summary.oversizeCandidates} oversize and ${summary.highVolumeCandidates} high-volume bags should be planned before queue buildup.`,
       tone:
-        analytics.operational.oversizeCandidates > 0 ||
-        analytics.operational.highVolumeCandidates > 0
-          ? "warning"
-          : "accent",
+        summary.oversizeCandidates > 0 || summary.highVolumeCandidates > 0 ? "warning" : "accent",
     },
   ];
 }
@@ -972,7 +1041,7 @@ function servicePrescriptions(analytics: CloudAnalytics): Prescription[] {
 }
 
 function dotTone(tone: Prescription["tone"] = "primary") {
-  if (tone === "accent") return "bg-accent";
+  if (tone === "accent") return "bg-success";
   if (tone === "warning") return "bg-warning";
   return "bg-primary";
 }
@@ -996,58 +1065,66 @@ function MetricCard({
 }) {
   const toneClass =
     tone === "accent"
-      ? "bg-accent/12 text-accent"
+      ? "border-border bg-surface-2 text-success"
       : tone === "warning"
-        ? "bg-warning/14 text-warning"
-        : "bg-primary/10 text-primary";
+        ? "border-border bg-surface-2 text-warning"
+        : "border-border bg-surface-2 text-primary";
 
   return (
-    <div className="rounded-2xl border bg-card p-5 shadow-elevated">
+    <div className="rounded-md border border-border bg-card p-5">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <div className="text-sm text-muted-foreground">{label}</div>
-          <div className="mt-2 truncate text-2xl font-extrabold">{value}</div>
+          <div className="text-[11px] font-medium uppercase leading-4 tracking-[0.1em] text-primary">
+            {label}
+          </div>
+          <div className="mt-6 truncate font-mono text-[36px] font-medium leading-10 tracking-[-0.01em] text-foreground">
+            {value}
+          </div>
         </div>
-        <div className={`grid h-10 w-10 shrink-0 place-items-center rounded-xl ${toneClass}`}>
-          <Icon className="h-5 w-5" />
+        <div className={`grid h-6 w-6 shrink-0 place-items-center rounded-md border ${toneClass}`}>
+          <Icon className="h-3.5 w-3.5" />
         </div>
       </div>
-      <div className="mt-4 text-xs font-medium text-muted-foreground">{helper}</div>
+      <div className="mt-4 text-[13px] leading-5 text-muted-foreground">{helper}</div>
     </div>
   );
 }
 
-function PlanningReadiness({ analytics }: { analytics: CloudAnalytics }) {
+function PlanningReadiness({ summary }: { summary: TravelRecordSummary }) {
   return (
-    <div className="rounded-2xl border bg-card p-5 shadow-elevated">
-      <h3 className="font-bold">Prediction inputs</h3>
-      <p className="mt-1 text-sm text-muted-foreground">
+    <div className="rounded-md border border-border bg-card p-6">
+      <h3 className="text-sm font-semibold uppercase leading-5 tracking-[0.08em] text-muted-foreground">
+        Prediction inputs
+      </h3>
+      <p className="mt-2 text-[13px] leading-5 text-muted-foreground">
         PNR, flight, terminal, dimensions, and manual weight combine into the first planning signal.
       </p>
       <div className="mt-5">
         <div className="mb-2 flex items-center justify-between text-sm">
-          <span className="font-medium">Planning readiness</span>
-          <span className="font-bold">{formatPercent(analytics.travel.pnrReadiness)}</span>
+          <span className="text-[13px] text-muted-foreground">Planning readiness</span>
+          <span className="font-mono text-[28px] font-medium leading-8 text-foreground">
+            {formatPercent(summary.pnrReadiness)}
+          </span>
         </div>
-        <div className="h-2.5 overflow-hidden rounded-full bg-secondary">
+        <div className="h-1.5 overflow-hidden rounded-full bg-surface-2">
           <div
             className="h-full rounded-full bg-primary"
-            style={{ width: `${Math.round((analytics.travel.pnrReadiness ?? 0) * 100)}%` }}
+            style={{ width: `${Math.round((summary.pnrReadiness ?? 0) * 100)}%` }}
           />
         </div>
       </div>
       <div className="mt-5 grid gap-2 text-sm">
         <PlanningRow
           label="Dimension coverage"
-          value={`${analytics.operational.dimensionReadyScans} scans with dimensions`}
+          value={`${summary.dimensionReadyScans} scans with dimensions`}
         />
-        <PlanningRow label="PNR coverage" value={`${analytics.travel.pnrLinkedScans} scans`} />
-        <PlanningRow label="Weight captured" value={formatKg(analytics.travel.totalWeightKg)} />
+        <PlanningRow label="PNR coverage" value={`${summary.pnrLinkedScans} scans`} />
+        <PlanningRow label="Weight captured" value={formatKg(summary.totalWeightKg)} />
         <PlanningRow
           label="Volume pressure"
-          value={`${analytics.operational.highVolumeCandidates} high-volume bags`}
+          value={`${summary.highVolumeCandidates} high-volume bags`}
         />
-        <PlanningRow label="Avg linear size" value={formatCm(analytics.operational.avgLinearCm)} />
+        <PlanningRow label="Avg linear size" value={formatCm(summary.avgLinearCm)} />
       </div>
     </div>
   );
@@ -1055,17 +1132,22 @@ function PlanningReadiness({ analytics }: { analytics: CloudAnalytics }) {
 
 function AirlinePlanningReadiness({ summary }: { summary: TravelRecordSummary }) {
   return (
-    <div className="rounded-2xl border bg-card p-5 shadow-elevated">
-      <h3 className="font-bold">Selected-scope readiness</h3>
-      <p className="mt-1 text-sm text-muted-foreground">
-        These signals recalculate from the active airline, date, flight, and category filters.
+    <div className="rounded-md border border-border bg-card p-6">
+      <h3 className="text-sm font-semibold uppercase leading-5 tracking-[0.08em] text-muted-foreground">
+        Selected-scope readiness
+      </h3>
+      <p className="mt-2 text-[13px] leading-5 text-muted-foreground">
+        These signals recalculate from the active date, airline, airport, terminal, and flight
+        filters.
       </p>
       <div className="mt-5">
         <div className="mb-2 flex items-center justify-between text-sm">
-          <span className="font-medium">Planning readiness</span>
-          <span className="font-bold">{formatPercent(summary.pnrReadiness)}</span>
+          <span className="text-[13px] text-muted-foreground">Planning readiness</span>
+          <span className="font-mono text-[28px] font-medium leading-8 text-foreground">
+            {formatPercent(summary.pnrReadiness)}
+          </span>
         </div>
-        <div className="h-2.5 overflow-hidden rounded-full bg-secondary">
+        <div className="h-1.5 overflow-hidden rounded-full bg-surface-2">
           <div
             className="h-full rounded-full bg-primary"
             style={{ width: `${Math.round((summary.pnrReadiness ?? 0) * 100)}%` }}
@@ -1091,81 +1173,297 @@ function AirlinePlanningReadiness({ summary }: { summary: TravelRecordSummary })
 
 function PlanningRow({ label, value }: { label: string; value: string }) {
   return (
-    <div className="flex items-center justify-between gap-3 rounded-xl bg-surface-elevated px-3 py-2">
+    <div className="flex items-center justify-between gap-3 border-b border-border py-2 last:border-b-0">
       <span className="text-muted-foreground">{label}</span>
-      <span className="text-right font-semibold">{value}</span>
+      <span className="text-right font-mono text-[13px] text-foreground">{value}</span>
     </div>
   );
 }
 
-function TravelLoadPanel({
+function ChartFrame({
   title,
-  items,
-  compact = false,
+  icon: Icon = BarChart3,
+  children,
+  className = "",
 }: {
   title: string;
-  items: CloudAnalytics["flightLoads"];
-  compact?: boolean;
+  icon?: IconType;
+  children: ReactNode;
+  className?: string;
 }) {
   return (
-    <div className="rounded-2xl border bg-card p-5 shadow-elevated">
+    <div className={`rounded-md border border-border bg-card p-6 ${className}`}>
       <div className="flex items-center justify-between gap-3">
-        <h3 className="font-bold">{title}</h3>
-        <div className="grid h-9 w-9 place-items-center rounded-xl bg-primary/10 text-primary">
-          <Plane className="h-4 w-4" />
+        <h3 className="text-sm font-semibold uppercase leading-5 tracking-[0.08em] text-muted-foreground">
+          {title}
+        </h3>
+        <div className="grid h-6 w-6 place-items-center rounded-md border border-border bg-surface-2 text-primary">
+          <Icon className="h-3.5 w-3.5" />
         </div>
       </div>
-      {items.length === 0 ? (
-        <p className="mt-5 text-sm text-muted-foreground">
-          Add PNR, airline, flight, airport, terminal, and weight during scan capture.
-        </p>
+      <div className="mt-4">{children}</div>
+    </div>
+  );
+}
+
+function EmptyChartMessage({ children }: { children: ReactNode }) {
+  return <p className="text-[13px] leading-5 text-muted-foreground">{children}</p>;
+}
+
+function FlightDistributionPanel({ title, items }: { title: string; items: TravelLoadItem[] }) {
+  const rows = items.slice(0, 6);
+  const maxCount = Math.max(...rows.map((item) => item.count), 1);
+  return (
+    <ChartFrame title={title} icon={Plane}>
+      {rows.length === 0 ? (
+        <EmptyChartMessage>
+          Add airline, flight, airport, terminal, and weight during scan capture.
+        </EmptyChartMessage>
       ) : (
-        <div className="mt-5 grid gap-3">
-          {items.slice(0, compact ? 4 : 6).map((item) => (
-            <div key={item.label} className="rounded-xl bg-surface-elevated p-3">
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <div className="truncate text-sm font-semibold">{item.label}</div>
-                  <div className="mt-1 text-xs text-muted-foreground">
-                    {item.count} bags · {formatKg(item.totalWeightKg)}
+        <div className="overflow-hidden">
+          <div className="grid grid-cols-[1.2fr_0.8fr_0.9fr_0.8fr] gap-3 border-b border-border bg-surface-2 px-3 py-2 text-[11px] font-medium uppercase leading-4 tracking-[0.1em] text-muted-foreground">
+            <span>Flight</span>
+            <span>Bags (kg)</span>
+            <span>Vs capacity</span>
+            <span>Status</span>
+          </div>
+          {rows.map((item) => {
+            const pressure = item.count / maxCount;
+            const hasException = item.oversizeCount > 0 || item.highVolumeCount > 0;
+            return (
+              <div
+                key={item.label}
+                className="grid grid-cols-[1.2fr_0.8fr_0.9fr_0.8fr] gap-3 border-b border-border px-3 py-3 text-[13px] last:border-b-0 hover:bg-surface-2/60"
+              >
+                <div className="min-w-0 truncate text-foreground">{item.label}</div>
+                <div className="font-mono text-foreground">
+                  {item.count} · {formatKg(item.totalWeightKg)}
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="w-10 font-mono text-muted-foreground">
+                    {formatPercent(pressure)}
+                  </span>
+                  <div className="h-1.5 min-w-16 flex-1 overflow-hidden rounded-full bg-surface-2">
+                    <div
+                      className={`h-full rounded-full ${
+                        hasException ? "bg-warning" : "bg-primary"
+                      }`}
+                      style={{ width: `${Math.max(8, Math.round(pressure * 100))}%` }}
+                    />
                   </div>
                 </div>
-                {item.oversizeCount > 0 || item.highVolumeCount > 0 ? (
-                  <TriangleAlert className="h-4 w-4 shrink-0 text-warning" />
-                ) : (
-                  <CheckCircle2 className="h-4 w-4 shrink-0 text-accent" />
-                )}
-              </div>
-              {!compact ? (
-                <div className="mt-3 flex flex-wrap gap-2 text-xs">
-                  <span className="rounded-full bg-background px-2.5 py-1">
-                    {item.oversizeCount} oversize
-                  </span>
-                  <span className="rounded-full bg-background px-2.5 py-1">
-                    {item.highVolumeCount} high-volume
-                  </span>
+                <div>
+                  <StatusPill
+                    status={hasException ? "Review" : "Normal"}
+                    tone={hasException ? "warning" : "accent"}
+                  />
                 </div>
-              ) : null}
-            </div>
-          ))}
+              </div>
+            );
+          })}
         </div>
       )}
+    </ChartFrame>
+  );
+}
+
+function AirportDistributionPanel({ items }: { items: TravelLoadItem[] }) {
+  const rows = loadChartData(items).slice(0, 5);
+  const max = Math.max(...rows.map((row) => row.bags), 1);
+  return (
+    <ChartFrame title="Airport distribution" icon={Gauge}>
+      {rows.length === 0 ? (
+        <EmptyChartMessage>No airport load data in the selected scope.</EmptyChartMessage>
+      ) : (
+        <div className="overflow-hidden">
+          <div className="grid grid-cols-[4.5rem_1fr_0.85fr_4.75rem] gap-3 border-b border-border bg-surface-2 px-3 py-2 text-[11px] font-medium uppercase leading-4 tracking-[0.1em] text-muted-foreground">
+            <span>Airport</span>
+            <span>Planned bags</span>
+            <span>Vs capacity</span>
+            <span>Status</span>
+          </div>
+          {rows.map((row) => {
+            const pressure = row.bags / max;
+            const hasException = row.alerts > 0;
+            return (
+              <div
+                key={row.label}
+                className="grid grid-cols-[4.5rem_1fr_0.85fr_4.75rem] items-center gap-3 border-b border-border px-3 py-3 text-[13px] last:border-b-0"
+              >
+                <span className="truncate font-mono text-foreground">{row.shortLabel}</span>
+                <span className="font-mono text-foreground">
+                  {row.weightKg > 0 ? formatKg(row.weightKg) : `${row.bags} bags`}
+                </span>
+                <div className="flex items-center gap-2">
+                  <span className="w-10 font-mono text-muted-foreground">
+                    {formatPercent(pressure)}
+                  </span>
+                  <div className="h-1.5 min-w-14 flex-1 overflow-hidden rounded-full bg-surface-2">
+                    <div
+                      className={`h-full rounded-full ${hasException ? "bg-warning" : "bg-primary"}`}
+                      style={{ width: `${Math.max(6, Math.round(pressure * 100))}%` }}
+                    />
+                  </div>
+                </div>
+                <StatusPill
+                  status={hasException ? "Watch" : "Normal"}
+                  tone={hasException ? "warning" : "success"}
+                />
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </ChartFrame>
+  );
+}
+
+function TerminalPressurePanel({ items }: { items: TravelLoadItem[] }) {
+  const rows = loadChartData(items).slice(0, 5);
+  const max = Math.max(...rows.map((row) => row.bags), 1);
+  return (
+    <ChartFrame title="Terminal pressure" icon={Gauge}>
+      {rows.length === 0 ? (
+        <EmptyChartMessage>No terminal pressure data in the selected scope.</EmptyChartMessage>
+      ) : (
+        <div className="overflow-hidden">
+          <div className="grid grid-cols-[5.5rem_0.8fr_1fr_4.75rem] gap-3 border-b border-border bg-surface-2 px-3 py-2 text-[11px] font-medium uppercase leading-4 tracking-[0.1em] text-muted-foreground">
+            <span>Terminal</span>
+            <span>Pressure</span>
+            <span>Vs threshold</span>
+            <span>Status</span>
+          </div>
+          {rows.map((row) => {
+            const pressure = row.bags / max;
+            const tone = pressure >= 0.9 ? "danger" : pressure >= 0.7 ? "warning" : "success";
+            return (
+              <div
+                key={row.label}
+                className="grid grid-cols-[5.5rem_0.8fr_1fr_4.75rem] items-center gap-3 border-b border-border px-3 py-3 text-[13px] last:border-b-0"
+              >
+                <span className="truncate font-mono text-foreground">{row.shortLabel}</span>
+                <span className="font-mono text-foreground">{formatPercent(pressure)}</span>
+                <div className="h-1.5 overflow-hidden rounded-full bg-surface-2">
+                  <div
+                    className={`h-full rounded-full ${progressToneClass(tone)}`}
+                    style={{ width: `${Math.max(6, Math.round(pressure * 100))}%` }}
+                  />
+                </div>
+                <StatusPill
+                  status={tone === "success" ? "Normal" : tone === "warning" ? "Watch" : "Critical"}
+                  tone={tone === "danger" ? "warning" : tone}
+                />
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </ChartFrame>
+  );
+}
+
+function DistributionDonutPanel({
+  title,
+  icon,
+  items,
+  emptyLabel,
+}: {
+  title: string;
+  icon: IconType;
+  items: DistributionItem[];
+  emptyLabel: string;
+}) {
+  const data = distributionChartData(items).slice(0, 6);
+  return (
+    <ChartFrame title={title} icon={icon}>
+      {data.length === 0 ? (
+        <EmptyChartMessage>{emptyLabel}</EmptyChartMessage>
+      ) : (
+        <DistributionRows rows={data} />
+      )}
+    </ChartFrame>
+  );
+}
+
+function DistributionBarPanel({
+  title,
+  icon,
+  items,
+  emptyLabel,
+}: {
+  title: string;
+  icon: IconType;
+  items: DistributionItem[];
+  emptyLabel: string;
+}) {
+  const data = distributionChartData(items).slice(0, 8);
+  return (
+    <ChartFrame title={title} icon={icon}>
+      {data.length === 0 ? (
+        <EmptyChartMessage>{emptyLabel}</EmptyChartMessage>
+      ) : (
+        <DistributionRows rows={data} />
+      )}
+    </ChartFrame>
+  );
+}
+
+function DistributionRows({ rows }: { rows: ReturnType<typeof distributionChartData> }) {
+  const max = Math.max(...rows.map((row) => row.count), 1);
+  return (
+    <div className="grid gap-0">
+      {rows.map((row) => (
+        <div
+          key={row.label}
+          className="grid grid-cols-[7rem_1fr_3rem] items-center gap-3 border-b border-border py-2.5 text-[13px] last:border-b-0"
+        >
+          <span className="truncate text-foreground">{row.shortLabel}</span>
+          <div className="h-1.5 overflow-hidden rounded-full bg-surface-2">
+            <div
+              className="h-full rounded-full bg-primary"
+              style={{ width: `${Math.max(6, Math.round((row.count / max) * 100))}%` }}
+            />
+          </div>
+          <span className="text-right font-mono text-muted-foreground">{row.count}</span>
+        </div>
+      ))}
     </div>
+  );
+}
+
+function progressToneClass(tone: "success" | "warning" | "danger") {
+  if (tone === "danger") return "bg-destructive";
+  if (tone === "warning") return "bg-warning";
+  return "bg-success";
+}
+
+function StatusPill({ status, tone }: { status: string; tone: "accent" | "success" | "warning" }) {
+  const resolvedTone = tone === "accent" ? "success" : tone;
+  return (
+    <span
+      className={`inline-flex h-5 items-center rounded-full px-2 text-[11px] font-medium ${
+        resolvedTone === "warning" ? "bg-warning/15 text-warning" : "bg-success/15 text-success"
+      }`}
+    >
+      {status}
+    </span>
   );
 }
 
 function QualityPanel({ analytics }: { analytics: CloudAnalytics }) {
   return (
-    <div className="rounded-2xl border bg-card p-5 shadow-elevated">
+    <div className="rounded-md border border-border bg-card p-6">
       <div className="flex items-start justify-between gap-3">
         <div>
-          <h3 className="font-bold">Capture quality by view</h3>
-          <p className="mt-1 text-sm text-muted-foreground">
+          <h3 className="text-sm font-semibold uppercase leading-5 tracking-[0.08em] text-muted-foreground">
+            Capture quality by view
+          </h3>
+          <p className="mt-2 text-[13px] leading-5 text-muted-foreground">
             Shows which photo angles create the most review friction.
           </p>
         </div>
-        <div className="grid h-9 w-9 place-items-center rounded-xl bg-accent/12 text-accent">
-          <Gauge className="h-4 w-4" />
+        <div className="grid h-6 w-6 place-items-center rounded-md border border-border bg-surface-2 text-primary">
+          <Gauge className="h-3.5 w-3.5" />
         </div>
       </div>
       <div className="mt-5 grid gap-3 sm:grid-cols-2">
@@ -1180,74 +1478,39 @@ function QualityPanel({ analytics }: { analytics: CloudAnalytics }) {
 function ViewQualityRow({ view }: { view: CloudAnalytics["viewQuality"][number] }) {
   const score = Math.round((view.avgQualityScore ?? 0) * 100);
   return (
-    <div className="rounded-xl bg-surface-elevated p-3">
+    <div className="rounded-md border border-border bg-surface-2 p-3">
       <div className="flex items-center justify-between gap-3 text-sm">
-        <span className="font-semibold capitalize">{view.view}</span>
-        <span className="font-bold">{score || "n/a"}%</span>
+        <span className="text-[13px] capitalize text-foreground">{view.view}</span>
+        <span className="font-mono text-[13px] text-foreground">{score || "n/a"}%</span>
       </div>
-      <div className="mt-2 h-2 overflow-hidden rounded-full bg-secondary">
+      <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-background">
         <div className="h-full rounded-full bg-primary" style={{ width: `${score}%` }} />
       </div>
-      <div className="mt-2 text-xs text-muted-foreground">
+      <div className="mt-2 text-[11px] text-muted-foreground">
         {view.imageCount} photos · {view.rejectedCount} rejected
       </div>
     </div>
   );
 }
 
-function DistributionPanel({
-  title,
-  icon: Icon,
-  items,
-  emptyLabel,
-}: {
-  title: string;
-  icon: IconType;
-  items: DistributionItem[];
-  emptyLabel: string;
-}) {
-  const max = Math.max(...items.map((item) => item.count), 1);
-  return (
-    <div className="rounded-2xl border bg-card p-5 shadow-elevated">
-      <div className="flex items-center justify-between gap-3">
-        <h3 className="font-bold">{title}</h3>
-        <div className="grid h-9 w-9 place-items-center rounded-xl bg-primary/10 text-primary">
-          <Icon className="h-4 w-4" />
-        </div>
-      </div>
-      {items.length === 0 ? (
-        <p className="mt-5 text-sm text-muted-foreground">{emptyLabel}</p>
-      ) : (
-        <div className="mt-5 grid gap-3">
-          {items.slice(0, 6).map((item) => (
-            <div key={item.label}>
-              <div className="mb-1.5 flex items-center justify-between gap-3 text-sm">
-                <span className="truncate capitalize">{formatLabel(item.label)}</span>
-                <span className="font-bold">{item.count}</span>
-              </div>
-              <div className="h-2 overflow-hidden rounded-full bg-secondary">
-                <div
-                  className="h-full rounded-full bg-primary"
-                  style={{ width: `${Math.max(6, Math.round((item.count / max) * 100))}%` }}
-                />
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
 function RecentScans({ scans }: { scans: CloudAnalytics["recentScans"] }) {
   return (
-    <div className="rounded-2xl border bg-card p-5 shadow-elevated">
+    <div className="rounded-md border border-border bg-card p-6">
       <div className="flex items-center justify-between gap-3">
         <div>
-          <h3 className="font-bold">Recent customer cases</h3>
-          <p className="mt-1 text-sm text-muted-foreground">Latest scan reports for follow-up.</p>
+          <h3 className="text-sm font-semibold uppercase leading-5 tracking-[0.08em] text-muted-foreground">
+            Recent customer cases
+          </h3>
+          <p className="mt-2 text-[13px] leading-5 text-muted-foreground">
+            Latest scan reports for follow-up.
+          </p>
         </div>
-        <Button variant="outline" size="sm" asChild>
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-9 rounded-md border-border bg-transparent text-[13px] text-foreground hover:border-secondary hover:bg-surface-2"
+          asChild
+        >
           <Link to="/reports-local">View all</Link>
         </Button>
       </div>
@@ -1257,14 +1520,14 @@ function RecentScans({ scans }: { scans: CloudAnalytics["recentScans"] }) {
             key={scan.id}
             to="/reports-local/$id"
             params={{ id: scan.id }}
-            className="rounded-xl border bg-surface-elevated p-4 transition hover:border-primary/70"
+            className="rounded-md border border-border bg-surface-2 p-4 transition-colors hover:border-secondary"
           >
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
-                <div className="truncate font-semibold">
+                <div className="truncate text-[13px] font-medium text-foreground">
                   {scan.reference || scan.bagType || "Baggage scan"}
                 </div>
-                <div className="mt-1 text-xs text-muted-foreground">
+                <div className="mt-1 font-mono text-[11px] text-muted-foreground">
                   {formatDate(scan.createdAt)}
                 </div>
               </div>
@@ -1272,25 +1535,25 @@ function RecentScans({ scans }: { scans: CloudAnalytics["recentScans"] }) {
               scan.captureValidationStatus === "needs_retake" ? (
                 <TriangleAlert className="h-4 w-4 shrink-0 text-warning" />
               ) : (
-                <CheckCircle2 className="h-4 w-4 shrink-0 text-accent" />
+                <CheckCircle2 className="h-4 w-4 shrink-0 text-success" />
               )}
             </div>
             <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
-              <span className="rounded-full bg-background px-2.5 py-1 font-medium">
+              <span className="rounded-full bg-background px-2 py-0.5 font-mono text-muted-foreground">
                 {scan.imageCount}/4 photos
               </span>
               {scan.bagType ? (
-                <span className="rounded-full bg-background px-2.5 py-1 font-medium capitalize">
+                <span className="rounded-full bg-background px-2 py-0.5 text-muted-foreground capitalize">
                   {formatLabel(scan.bagType)}
                 </span>
               ) : null}
               {scan.travelContext?.pnr ? (
-                <span className="rounded-full bg-background px-2.5 py-1 font-medium">
+                <span className="rounded-full bg-background px-2 py-0.5 font-mono text-muted-foreground">
                   PNR {scan.travelContext.pnr}
                 </span>
               ) : null}
               {scan.travelContext?.flight_number ? (
-                <span className="rounded-full bg-background px-2.5 py-1 font-medium">
+                <span className="rounded-full bg-background px-2 py-0.5 font-mono text-muted-foreground">
                   {scan.travelContext.flight_number}
                 </span>
               ) : null}
@@ -1304,15 +1567,18 @@ function RecentScans({ scans }: { scans: CloudAnalytics["recentScans"] }) {
 
 function EmptyState() {
   return (
-    <div className="rounded-2xl border border-dashed bg-card p-10 text-center shadow-elevated">
-      <div className="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-gradient-brand text-primary-foreground shadow-brand">
+    <div className="rounded-md border border-dashed border-border bg-card p-10 text-center">
+      <div className="mx-auto grid h-10 w-10 place-items-center rounded-md border border-border bg-surface-2 text-primary">
         <BarChart3 className="h-6 w-6" />
       </div>
-      <h2 className="mt-4 text-xl font-bold">No analytics data yet</h2>
-      <p className="mx-auto mt-2 max-w-xl text-sm text-muted-foreground">
+      <h2 className="mt-4 text-base font-semibold text-foreground">No analytics data yet</h2>
+      <p className="mx-auto mt-2 max-w-xl text-[13px] text-muted-foreground">
         Complete a scan to populate role-based analytics.
       </p>
-      <Button className="mt-6 bg-gradient-brand text-primary-foreground shadow-brand" asChild>
+      <Button
+        className="mt-6 h-9 rounded-md bg-primary px-3 text-[13px] text-primary-foreground hover:bg-primary/90"
+        asChild
+      >
         <Link to="/scan-local">
           <Camera className="mr-2 h-4 w-4" />
           New scan
@@ -1326,9 +1592,12 @@ function filterTravelRecords(records: TravelRecord[], filters: AirlineFilters) {
   return records.filter((record) => {
     const airlineMatch = filters.airline === "all" || record.airline === filters.airline;
     const dateMatch = filters.date === "all" || record.flightDate === filters.date;
-    const flightMatch = filters.flight === "all" || record.flightNumber === filters.flight;
-    const categoryMatch = filters.category === "all" || record.baggageCategory === filters.category;
-    return airlineMatch && dateMatch && flightMatch && categoryMatch;
+    const airportMatch =
+      filters.airport === "all" ||
+      record.departureAirport === filters.airport ||
+      record.arrivalAirport === filters.airport;
+    const terminalMatch = filters.terminal === "all" || record.terminal === filters.terminal;
+    return airlineMatch && dateMatch && airportMatch && terminalMatch;
   });
 }
 
@@ -1427,10 +1696,13 @@ function flightRecordLabel(record: TravelRecord) {
   return [flight || "Unknown flight", record.flightDate, route].filter(Boolean).join(" · ");
 }
 
-function pnrRecordLabel(record: TravelRecord) {
-  if (!record.pnr) return null;
-  const flight = [record.airline, record.flightNumber].filter(Boolean).join(" ");
-  return [record.pnr, flight].filter(Boolean).join(" · ");
+function airportRecordLabel(record: TravelRecord) {
+  return record.departureAirport ?? record.arrivalAirport ?? null;
+}
+
+function terminalRecordLabel(record: TravelRecord) {
+  if (!record.terminal) return null;
+  return [record.departureAirport, record.terminal].filter(Boolean).join(" · ");
 }
 
 function recordFlightIdentity(record: TravelRecord) {
@@ -1450,8 +1722,8 @@ function airlineScopeLabel(filters: AirlineFilters) {
   const parts = [
     filters.airline !== "all" ? filters.airline : "All airlines",
     filters.date !== "all" ? filters.date : null,
-    filters.flight !== "all" ? filters.flight : null,
-    filters.category !== "all" ? formatLabel(filters.category) : null,
+    filters.airport !== "all" ? filters.airport : null,
+    filters.terminal !== "all" ? filters.terminal : null,
   ].filter(Boolean);
   return parts.join(" · ");
 }
@@ -1507,6 +1779,33 @@ function downloadAirlineReport(records: TravelRecord[], filters: AirlineFilters)
   URL.revokeObjectURL(url);
 }
 
+function loadChartData(items: TravelLoadItem[]) {
+  return items
+    .filter((item) => isKnownLabel(item.label))
+    .map((item) => ({
+      label: item.label,
+      shortLabel: shortChartLabel(item.label),
+      bags: item.count,
+      weightKg: item.totalWeightKg ?? 0,
+      alerts: item.oversizeCount + item.highVolumeCount,
+    }));
+}
+
+function distributionChartData(items: DistributionItem[]) {
+  return items
+    .filter((item) => isKnownLabel(item.label))
+    .map((item) => ({
+      label: formatLabel(item.label),
+      shortLabel: shortChartLabel(formatLabel(item.label)),
+      count: item.count,
+    }));
+}
+
+function shortChartLabel(value: string) {
+  const label = value.length > 18 ? `${value.slice(0, 16)}...` : value;
+  return label || "n/a";
+}
+
 function csvRow(values: Array<string | number | null>) {
   return values
     .map((value) => {
@@ -1514,12 +1813,6 @@ function csvRow(values: Array<string | number | null>) {
       return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
     })
     .join(",");
-}
-
-function sortedUniqueStrings(values: Array<string | null>) {
-  return [...new Set(values.filter((value): value is string => Boolean(value)))]
-    .sort((a, b) => a.localeCompare(b))
-    .slice(0, 250);
 }
 
 function sumNullableNumbers(values: Array<number | null>) {
@@ -1544,11 +1837,26 @@ function uniqueCount(values: Array<string | null>) {
 
 function topLabel(items: DistributionItem[]) {
   const item = topItem(items);
-  return item ? formatLabel(item.label) : "n/a";
+  return item ? formatLabel(item.label) : "Not captured";
 }
 
 function topItem(items: DistributionItem[]) {
-  return items[0] ?? null;
+  return items.find((item) => isKnownLabel(item.label)) ?? null;
+}
+
+function knownItemCount(items: DistributionItem[]) {
+  return items.filter((item) => isKnownLabel(item.label)).length;
+}
+
+function isKnownLabel(value: string) {
+  const normalized = value.trim().toLowerCase();
+  return Boolean(
+    normalized &&
+    normalized !== "unknown" &&
+    normalized !== "n/a" &&
+    normalized !== "not captured" &&
+    !normalized.startsWith("unknown "),
+  );
 }
 
 function formatPercent(value: number | null) {
