@@ -3,10 +3,8 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import type { BaggageView } from "@/lib/baggage-views";
 import { VIEWS } from "@/lib/baggage-views";
-import { getScan as getLocalScan, listScans as listLocalScans } from "./local-scan-store.server";
 import { normalizeScanAnalysis } from "./analysis-normalizer";
 import type {
-  AnalyticsScanSummary,
   CloudAnalytics,
   CloudDamageFinding,
   CloudScanDetail,
@@ -15,7 +13,7 @@ import type {
   CloudValidationEvent,
   SaveCloudScanData,
 } from "./cloud-scan-store.types";
-import type { LocalScanDetail, ManualDimensionsCm, TravelContext } from "./local-scan-store.types";
+import type { ManualDimensionsCm, TravelContext } from "./local-scan-store.types";
 
 const PHOTO_BUCKET = "bagscan-photos";
 const SIGNED_URL_SECONDS = 60 * 60;
@@ -315,42 +313,35 @@ export async function getCloudAnalytics(
   const extractions = rows(extractionsResult.data);
   const images = rows(imagesResult.data);
   const damages = rows(damageResult.data);
-  const cloudIds = new Set(sessions.map((row) => stringField(row, "id")).filter(Boolean));
-  const localRows = loadLocalAnalyticsRows(userId, cloudIds);
-  const allSessions = [...sessions, ...localRows.sessions];
-  const allExtractions = [...extractions, ...localRows.extractions];
-  const allImages = [...images, ...localRows.images];
-  const allDamages = [...damages, ...localRows.damages];
-  const allRecentScans = [...recentScans, ...localRows.recentScans]
+  const allRecentScans = recentScans
     .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))
     .slice(0, 10);
-  const extractionByScan = new Map(allExtractions.map((row) => [stringField(row, "scan_id"), row]));
-  const travelRows = travelAnalyticsRows(allSessions, extractionByScan);
+  const extractionByScan = new Map(extractions.map((row) => [stringField(row, "scan_id"), row]));
+  const travelRows = travelAnalyticsRows(sessions, extractionByScan);
   const weightedRows = travelRows.filter((row) => row.weightKg != null);
-  const dimensionRows = allExtractions.filter((row) => linearCm(row) != null);
+  const dimensionRows = extractions.filter((row) => linearCm(row) != null);
   const oversizeCandidates = dimensionRows.filter((row) => (linearCm(row) ?? 0) > 158).length;
-  const highVolumeCandidates = allExtractions.filter(
+  const highVolumeCandidates = extractions.filter(
     (row) => (numberField(row, "volume_liters") ?? 0) >= 90,
   ).length;
 
   return {
     totals: {
-      scans: allSessions.length,
-      photos: allImages.length,
-      completed: allSessions.filter((row) => stringField(row, "status") === "completed").length,
-      needsReview: allSessions.filter((row) => stringField(row, "status") === "needs_review")
-        .length,
-      failed: allSessions.filter((row) => stringField(row, "status") === "failed").length,
-      damages: allDamages.length,
-      avgQualityScore: average(allExtractions.map((row) => numberField(row, "quality_score"))),
-      avgIdentityScore: average(allExtractions.map((row) => numberField(row, "identity_score"))),
-      avgVolumeLiters: average(allExtractions.map((row) => numberField(row, "volume_liters"))),
+      scans: sessions.length,
+      photos: images.length,
+      completed: sessions.filter((row) => stringField(row, "status") === "completed").length,
+      needsReview: sessions.filter((row) => stringField(row, "status") === "needs_review").length,
+      failed: sessions.filter((row) => stringField(row, "status") === "failed").length,
+      damages: damages.length,
+      avgQualityScore: average(extractions.map((row) => numberField(row, "quality_score"))),
+      avgIdentityScore: average(extractions.map((row) => numberField(row, "identity_score"))),
+      avgVolumeLiters: average(extractions.map((row) => numberField(row, "volume_liters"))),
     },
     sources: {
       cloudScans: sessions.length,
-      localScans: localRows.sessions.length,
+      localScans: 0,
       cloudPhotos: images.length,
-      localPhotos: localRows.images.length,
+      localPhotos: 0,
     },
     operational: {
       dimensionReadyScans: dimensionRows.length,
@@ -358,11 +349,11 @@ export async function getCloudAnalytics(
       highVolumeCandidates,
       avgLinearCm: average(dimensionRows.map(linearCm)),
       reviewRate: ratio(
-        allSessions.filter((row) => stringField(row, "status") === "needs_review").length,
-        allSessions.length,
+        sessions.filter((row) => stringField(row, "status") === "needs_review").length,
+        sessions.length,
       ),
-      damageRate: ratio(allDamages.length, allSessions.length),
-      planningReadiness: ratio(dimensionRows.length, allSessions.length),
+      damageRate: ratio(damages.length, sessions.length),
+      planningReadiness: ratio(dimensionRows.length, sessions.length),
     },
     travel: {
       pnrLinkedScans: travelRows.filter((row) => row.pnr).length,
@@ -374,7 +365,7 @@ export async function getCloudAnalytics(
       avgWeightKg: average(weightedRows.map((row) => row.weightKg)),
       pnrReadiness: ratio(
         travelRows.filter((row) => row.pnr && row.flightNumber && row.weightKg != null).length,
-        allSessions.length,
+        sessions.length,
       ),
     },
     filterOptions: {
@@ -386,21 +377,22 @@ export async function getCloudAnalytics(
       flightDates: sortedUnique(travelRows.map((row) => row.flightDate)),
       baggageCategories: sortedUnique(travelRows.map((row) => row.baggageCategory)),
     },
+    travelRecords: travelRows.map(travelRecordForDashboard),
     airlineLoads: groupedTravelLoads(travelRows, airlineLabel),
     airportLoads: groupedTravelLoads(travelRows, airportLabel),
     flightLoads: groupedTravelLoads(travelRows, flightLabel),
     terminalLoads: groupedTravelLoads(travelRows, terminalLabel),
     pnrGroups: groupedTravelLoads(travelRows, pnrLabel),
-    bagTypes: distribution(allExtractions, "bag_type"),
-    baggageCategories: distribution(allSessions, "baggage_category"),
-    brands: distribution(allExtractions, "brand_guess"),
-    formFactors: distribution(allExtractions, "luggage_form_factor"),
-    sizeClasses: distribution(allExtractions, "size_class"),
-    conditions: distribution(allExtractions, "overall_condition"),
-    materials: distribution(allExtractions, "material"),
-    damageSeverity: distribution(allDamages, "severity"),
+    bagTypes: distribution(extractions, "bag_type"),
+    baggageCategories: distribution(sessions, "baggage_category"),
+    brands: distribution(extractions, "brand_guess"),
+    formFactors: distribution(extractions, "luggage_form_factor"),
+    sizeClasses: distribution(extractions, "size_class"),
+    conditions: distribution(extractions, "overall_condition"),
+    materials: distribution(extractions, "material"),
+    damageSeverity: distribution(damages, "severity"),
     viewQuality: VIEWS.map((view) => {
-      const viewRows = allImages.filter((row) => stringField(row, "view") === view.key);
+      const viewRows = images.filter((row) => stringField(row, "view") === view.key);
       return {
         view: view.key,
         imageCount: viewRows.length,
@@ -415,16 +407,10 @@ export async function getCloudAnalytics(
   };
 }
 
-type AnalyticsRows = {
-  sessions: Row[];
-  extractions: Row[];
-  images: Row[];
-  damages: Row[];
-  recentScans: AnalyticsScanSummary[];
-};
-
 type TravelAnalyticsRow = {
   id: string;
+  status: string;
+  createdAt: string;
   pnr: string | null;
   airline: string | null;
   flightNumber: string | null;
@@ -437,150 +423,10 @@ type TravelAnalyticsRow = {
   weightKg: number | null;
   linearCm: number | null;
   volumeLiters: number | null;
+  bagType: string | null;
+  sizeClass: string | null;
+  overallCondition: string | null;
 };
-
-function loadLocalAnalyticsRows(userId: string, existingIds: Set<string>): AnalyticsRows {
-  try {
-    const summaries = listLocalScans(userId, 500).filter((scan) => !existingIds.has(scan.id));
-    const details = summaries
-      .map((summary) => safeLocalDetail(userId, summary.id))
-      .filter((detail): detail is LocalScanDetail => Boolean(detail));
-
-    return {
-      sessions: details.map(localSessionRow),
-      extractions: details.map(localExtractionRow),
-      images: details.flatMap(localImageRows),
-      damages: details.flatMap(localDamageRows),
-      recentScans: details
-        .map(localScanToAnalyticsSummary)
-        .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))
-        .slice(0, 10),
-    };
-  } catch {
-    return {
-      sessions: [],
-      extractions: [],
-      images: [],
-      damages: [],
-      recentScans: [],
-    };
-  }
-}
-
-function safeLocalDetail(userId: string, id: string) {
-  try {
-    return getLocalScan(userId, id);
-  } catch {
-    return null;
-  }
-}
-
-function localSessionRow(detail: LocalScanDetail): Row {
-  return {
-    id: detail.id,
-    status: localStatus(detail),
-    created_at: detail.createdAt,
-    pnr: detail.travelContext?.pnr ?? null,
-    airline: detail.travelContext?.airline ?? null,
-    flight_number: detail.travelContext?.flight_number ?? null,
-    flight_date: detail.travelContext?.flight_date ?? null,
-    departure_airport: detail.travelContext?.departure_airport ?? null,
-    arrival_airport: detail.travelContext?.arrival_airport ?? null,
-    terminal: detail.travelContext?.terminal ?? null,
-    bag_tag: detail.travelContext?.bag_tag ?? null,
-    baggage_category: detail.travelContext?.baggage_category ?? null,
-    weight_kg: detail.travelContext?.weight_kg ?? null,
-    special_handling: detail.travelContext?.special_handling ?? null,
-  };
-}
-
-function localExtractionRow(detail: LocalScanDetail): Row {
-  const normalized = normalizeScanAnalysis(detail.analysis);
-  const dimensions = detail.manualDimensionsCm;
-  const width = dimensions?.width ?? normalized.widthCm;
-  const height = dimensions?.height ?? normalized.heightCm;
-  const depth = dimensions?.depth ?? normalized.depthCm;
-
-  return {
-    scan_id: detail.id,
-    bag_type: detail.bagType ?? normalized.bagType,
-    size_class: normalized.sizeClass,
-    brand_guess: normalized.brandGuess,
-    brand_confidence: normalized.brandConfidence,
-    visible_logo_text: normalized.visibleLogoText,
-    model_guess: normalized.modelGuess,
-    model_confidence: normalized.modelConfidence,
-    shell_type: normalized.shellType,
-    luggage_form_factor: normalized.luggageFormFactor,
-    material: normalized.material,
-    overall_condition: detail.overallCondition ?? normalized.overallCondition,
-    width_cm: width,
-    height_cm: height,
-    depth_cm: depth,
-    quality_score: normalized.qualityScore,
-    identity_score: normalized.identityScore,
-    volume_liters: volumeLiters(width, height, depth),
-  };
-}
-
-function localImageRows(detail: LocalScanDetail): Row[] {
-  const normalized = normalizeScanAnalysis(detail.analysis);
-  return detail.images.map((image) => {
-    const metrics = normalized.imageMetrics[image.view];
-    return {
-      scan_id: detail.id,
-      view: image.view,
-      quality_score: metrics.qualityScore,
-      identity_score: metrics.identityScore,
-      view_validation_status: metrics.viewValidationStatus,
-    };
-  });
-}
-
-function localDamageRows(detail: LocalScanDetail): Row[] {
-  const normalized = normalizeScanAnalysis(detail.analysis);
-  return normalized.damageFindings.map((finding) => ({
-    scan_id: detail.id,
-    severity: finding.severity,
-  }));
-}
-
-function localScanToAnalyticsSummary(detail: LocalScanDetail): AnalyticsScanSummary {
-  const extraction = localExtractionRow(detail);
-  return {
-    id: detail.id,
-    reference: detail.reference,
-    notes: detail.notes,
-    model: detail.model,
-    status: localStatus(detail),
-    createdAt: detail.createdAt,
-    updatedAt: detail.updatedAt,
-    travelContext: detail.travelContext,
-    manualDimensionsCm: detail.manualDimensionsCm,
-    approvedReviewViews: detail.approvedReviewViews,
-    captureValidationStatus: detail.captureValidationStatus,
-    summary: detail.summary,
-    bagType: stringOrNull(extraction.bag_type),
-    sizeClass: stringOrNull(extraction.size_class),
-    brandGuess: stringOrNull(extraction.brand_guess),
-    overallCondition: stringOrNull(extraction.overall_condition),
-    widthCm: numberField(extraction, "width_cm"),
-    heightCm: numberField(extraction, "height_cm"),
-    depthCm: numberField(extraction, "depth_cm"),
-    volumeLiters: numberField(extraction, "volume_liters"),
-    qualityScore: numberField(extraction, "quality_score"),
-    identityScore: numberField(extraction, "identity_score"),
-    imageCount: detail.imageCount,
-    storage: "local",
-  };
-}
-
-function localStatus(detail: LocalScanDetail) {
-  return detail.captureValidationStatus === "needs_review" ||
-    detail.captureValidationStatus === "needs_retake"
-    ? "needs_review"
-    : detail.status;
-}
 
 function cloudDetailToSummary(detail: CloudScanDetail): CloudScanSummary {
   const { analysis, images, damageFindings, validationEvents, ...summary } = detail;
@@ -759,6 +605,8 @@ function travelAnalyticsRows(
     const extraction = extractionByScan.get(id);
     return {
       id,
+      status: stringField(session, "status"),
+      createdAt: stringField(session, "created_at"),
       pnr: stringOrNull(session.pnr),
       airline: stringOrNull(session.airline),
       flightNumber: stringOrNull(session.flight_number),
@@ -771,8 +619,34 @@ function travelAnalyticsRows(
       weightKg: numberField(session, "weight_kg"),
       linearCm: extraction ? linearCm(extraction) : null,
       volumeLiters: extraction ? numberField(extraction, "volume_liters") : null,
+      bagType: stringOrNull(extraction?.bag_type),
+      sizeClass: stringOrNull(extraction?.size_class),
+      overallCondition: stringOrNull(extraction?.overall_condition),
     };
   });
+}
+
+function travelRecordForDashboard(row: TravelAnalyticsRow) {
+  return {
+    id: row.id,
+    status: row.status,
+    createdAt: row.createdAt,
+    pnr: row.pnr,
+    airline: row.airline,
+    flightNumber: row.flightNumber,
+    flightDate: row.flightDate,
+    departureAirport: row.departureAirport,
+    arrivalAirport: row.arrivalAirport,
+    terminal: row.terminal,
+    bagTag: row.bagTag,
+    baggageCategory: row.baggageCategory,
+    weightKg: row.weightKg,
+    linearCm: row.linearCm,
+    volumeLiters: row.volumeLiters,
+    bagType: row.bagType,
+    sizeClass: row.sizeClass,
+    overallCondition: row.overallCondition,
+  };
 }
 
 function groupedTravelLoads(
@@ -984,11 +858,6 @@ function linearCm(row: Row) {
   const depth = numberField(row, "depth_cm");
   if (width == null || height == null || depth == null) return null;
   return width + height + depth;
-}
-
-function volumeLiters(width: number | null, height: number | null, depth: number | null) {
-  if (width == null || height == null || depth == null) return null;
-  return Math.round((width * height * depth) / 10) / 100;
 }
 
 function ratio(value: number, total: number) {

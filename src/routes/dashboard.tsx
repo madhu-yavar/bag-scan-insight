@@ -7,6 +7,7 @@ import {
   Camera,
   CheckCircle2,
   ClipboardCheck,
+  Download,
   Factory,
   Gauge,
   Image,
@@ -21,6 +22,7 @@ import {
 import {
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type ComponentType,
@@ -52,6 +54,29 @@ export const Route = createFileRoute("/dashboard")({
 type DistributionItem = { label: string; count: number };
 type IconType = ComponentType<{ className?: string }>;
 type DashboardView = "airline" | "airport" | "insurance" | "manufacturing" | "service";
+type TravelRecord = CloudAnalytics["travelRecords"][number];
+type TravelLoadItem = CloudAnalytics["flightLoads"][number];
+type AirlineFilters = {
+  airline: string;
+  date: string;
+  flight: string;
+  category: string;
+};
+type TravelRecordSummary = {
+  scans: number;
+  pnrLinkedScans: number;
+  uniquePnrs: number;
+  uniqueFlights: number;
+  uniqueAirlines: number;
+  weightedScans: number;
+  totalWeightKg: number | null;
+  avgWeightKg: number | null;
+  dimensionReadyScans: number;
+  oversizeCandidates: number;
+  highVolumeCandidates: number;
+  avgLinearCm: number | null;
+  pnrReadiness: number | null;
+};
 type Prescription = {
   title: string;
   detail: string;
@@ -272,12 +297,49 @@ function RolePanel({ view, analytics }: { view: DashboardView; analytics: CloudA
 function AirlineView({ analytics }: { analytics: CloudAnalytics }) {
   const [airline, setAirline] = useState("all");
   const [date, setDate] = useState("all");
-  const flightLoads = analytics.flightLoads.filter((item) => {
-    const label = item.label.toLowerCase();
-    const airlineMatch = airline === "all" || label.startsWith(airline.toLowerCase());
-    const dateMatch = date === "all" || label.includes(date.toLowerCase());
-    return airlineMatch && dateMatch;
-  });
+  const [flight, setFlight] = useState("all");
+  const [category, setCategory] = useState("all");
+  const filters = useMemo(
+    () => ({ airline, date, flight, category }),
+    [airline, category, date, flight],
+  );
+  const scopedRecords = useMemo(
+    () => filterTravelRecords(analytics.travelRecords, filters),
+    [analytics.travelRecords, filters],
+  );
+  const availableFlights = useMemo(
+    () =>
+      sortedUniqueStrings(
+        filterTravelRecords(analytics.travelRecords, {
+          airline,
+          date,
+          flight: "all",
+          category,
+        }).map((record) => record.flightNumber),
+      ),
+    [airline, analytics.travelRecords, category, date],
+  );
+  const scopedSummary = useMemo(() => summarizeTravelRecords(scopedRecords), [scopedRecords]);
+  const flightLoads = useMemo(
+    () => groupedRecordLoads(scopedRecords, flightRecordLabel),
+    [scopedRecords],
+  );
+  const pnrLoads = useMemo(
+    () => groupedRecordLoads(scopedRecords, pnrRecordLabel),
+    [scopedRecords],
+  );
+  const categoryDistribution = useMemo(
+    () => distributionFromRecords(scopedRecords, "baggageCategory"),
+    [scopedRecords],
+  );
+  const sizeDistribution = useMemo(
+    () => distributionFromRecords(scopedRecords, "sizeClass"),
+    [scopedRecords],
+  );
+
+  useEffect(() => {
+    if (flight !== "all" && !availableFlights.includes(flight)) setFlight("all");
+  }, [availableFlights, flight]);
 
   return (
     <section className="space-y-6">
@@ -300,45 +362,71 @@ function AirlineView({ analytics }: { analytics: CloudAnalytics }) {
             onChange: setDate,
             options: analytics.filterOptions.flightDates,
           },
+          {
+            label: "Flight number",
+            value: flight,
+            onChange: setFlight,
+            options: availableFlights,
+          },
+          {
+            label: "Baggage category",
+            value: category,
+            onChange: setCategory,
+            options: analytics.filterOptions.baggageCategories,
+          },
         ]}
+      />
+      <ReportActionBar
+        count={scopedRecords.length}
+        label={airlineScopeLabel(filters)}
+        onDownload={() => downloadAirlineReport(scopedRecords, filters)}
       />
       <MetricGrid>
         <MetricCard
           icon={Briefcase}
           label="PNR-linked bags"
-          value={analytics.travel.pnrLinkedScans}
-          helper={`${analytics.travel.uniquePnrs} PNR groups identified`}
+          value={scopedSummary.pnrLinkedScans}
+          helper={`${scopedSummary.uniquePnrs} PNR groups in selected data`}
           tone="accent"
         />
         <MetricCard
           icon={Plane}
-          label="Airline groups"
-          value={analytics.travel.uniqueAirlines}
-          helper={`${analytics.travel.uniqueFlights} flight groups in current data`}
+          label="Flight groups"
+          value={scopedSummary.uniqueFlights}
+          helper={`${scopedSummary.uniqueAirlines} airlines in selected data`}
         />
         <MetricCard
           icon={BarChart3}
           label="Baggage mix"
-          value={topLabel(analytics.baggageCategories)}
-          helper="Cabin, check-in, or special handling signal"
+          value={topLabel(categoryDistribution)}
+          helper={`${scopedSummary.oversizeCandidates} oversize, ${scopedSummary.highVolumeCandidates} high-volume`}
         />
         <MetricCard
           icon={Gauge}
           label="Captured weight"
-          value={formatKg(analytics.travel.totalWeightKg)}
-          helper={`${analytics.travel.weightedScans} bags with manual weight`}
+          value={formatKg(scopedSummary.totalWeightKg)}
+          helper={`${scopedSummary.weightedScans} bags with manual weight`}
         />
       </MetricGrid>
-      <PrescriptionPanel title="Airline prescriptions" items={airlinePrescriptions(analytics)} />
+      <PrescriptionPanel
+        title="Airline prescriptions"
+        items={airlinePrescriptions(scopedSummary, flightLoads, filters)}
+      />
       <div className="grid gap-6 lg:grid-cols-[0.9fr_1.1fr]">
-        <PlanningReadiness analytics={analytics} />
+        <AirlinePlanningReadiness summary={scopedSummary} />
         <TravelLoadPanel title="Flight baggage distribution" items={flightLoads} />
-        <TravelLoadPanel title="Airline distribution" items={analytics.airlineLoads} compact />
+        <TravelLoadPanel title="PNR baggage groups" items={pnrLoads} compact />
         <DistributionPanel
           title="Cabin vs check-in"
           icon={Briefcase}
-          items={analytics.baggageCategories}
+          items={categoryDistribution}
           emptyLabel="No baggage category data yet"
+        />
+        <DistributionPanel
+          title="Size pressure"
+          icon={Ruler}
+          items={sizeDistribution}
+          emptyLabel="No size data in selected scope"
         />
       </div>
     </section>
@@ -661,6 +749,31 @@ function FilterBar({
   );
 }
 
+function ReportActionBar({
+  count,
+  label,
+  onDownload,
+}: {
+  count: number;
+  label: string;
+  onDownload: () => void;
+}) {
+  return (
+    <div className="flex flex-col gap-3 rounded-2xl border bg-card p-4 shadow-elevated sm:flex-row sm:items-center sm:justify-between">
+      <div>
+        <div className="text-sm font-semibold">{label}</div>
+        <div className="mt-1 text-xs text-muted-foreground">
+          {count} baggage records in the selected airline planning scope.
+        </div>
+      </div>
+      <Button variant="outline" onClick={onDownload} disabled={count === 0}>
+        <Download className="mr-2 h-4 w-4" />
+        Download report
+      </Button>
+    </div>
+  );
+}
+
 function PrescriptionPanel({ title, items }: { title: string; items: Prescription[] }) {
   return (
     <section className="rounded-2xl border bg-card p-5 shadow-elevated">
@@ -687,38 +800,40 @@ function PrescriptionPanel({ title, items }: { title: string; items: Prescriptio
   );
 }
 
-function airlinePrescriptions(analytics: CloudAnalytics): Prescription[] {
-  const topFlight = analytics.flightLoads[0];
+function airlinePrescriptions(
+  summary: TravelRecordSummary,
+  flightLoads: TravelLoadItem[],
+  filters: AirlineFilters,
+): Prescription[] {
+  const topFlight = flightLoads[0];
   return [
     topFlight
       ? {
           title: "Plan by flight load",
           detail: `${topFlight.label} has ${topFlight.count} scanned bags and ${formatKg(
             topFlight.totalWeightKg,
-          )} captured weight. Use this grouping for belt and handling allocation.`,
+          )} captured weight in ${airlineScopeLabel(
+            filters,
+          )}. Use this for staff, gate, belt, and internal transport planning.`,
           tone: topFlight.oversizeCount > 0 ? "warning" : "accent",
         }
       : {
-          title: "Capture flight context",
-          detail:
-            "Add PNR, airline, flight number, flight date, airports, terminal, and weight during scan capture.",
+          title: "No records in selected scope",
+          detail: "Change the airline/date/flight filters or capture travel context during scan.",
           tone: "warning",
         },
     {
       title: "Watch exception baggage",
-      detail: `${analytics.operational.oversizeCandidates} oversize and ${analytics.operational.highVolumeCandidates} high-volume bags may need gate, loading, or internal transport attention.`,
+      detail: `${summary.oversizeCandidates} oversize and ${summary.highVolumeCandidates} high-volume bags may need gate, loading, or internal transport attention.`,
       tone:
-        analytics.operational.oversizeCandidates > 0 ||
-        analytics.operational.highVolumeCandidates > 0
-          ? "warning"
-          : "accent",
+        summary.oversizeCandidates > 0 || summary.highVolumeCandidates > 0 ? "warning" : "accent",
     },
     {
       title: "Improve load planning readiness",
       detail: `${formatPercent(
-        analytics.travel.pnrReadiness,
+        summary.pnrReadiness,
       )} of scans have PNR, flight, and weight. Fuel planning remains advisory until integrated with airline load-control data.`,
-      tone: (analytics.travel.pnrReadiness ?? 0) >= 0.8 ? "accent" : "primary",
+      tone: (summary.pnrReadiness ?? 0) >= 0.8 ? "accent" : "primary",
     },
   ];
 }
@@ -933,6 +1048,42 @@ function PlanningReadiness({ analytics }: { analytics: CloudAnalytics }) {
           value={`${analytics.operational.highVolumeCandidates} high-volume bags`}
         />
         <PlanningRow label="Avg linear size" value={formatCm(analytics.operational.avgLinearCm)} />
+      </div>
+    </div>
+  );
+}
+
+function AirlinePlanningReadiness({ summary }: { summary: TravelRecordSummary }) {
+  return (
+    <div className="rounded-2xl border bg-card p-5 shadow-elevated">
+      <h3 className="font-bold">Selected-scope readiness</h3>
+      <p className="mt-1 text-sm text-muted-foreground">
+        These signals recalculate from the active airline, date, flight, and category filters.
+      </p>
+      <div className="mt-5">
+        <div className="mb-2 flex items-center justify-between text-sm">
+          <span className="font-medium">Planning readiness</span>
+          <span className="font-bold">{formatPercent(summary.pnrReadiness)}</span>
+        </div>
+        <div className="h-2.5 overflow-hidden rounded-full bg-secondary">
+          <div
+            className="h-full rounded-full bg-primary"
+            style={{ width: `${Math.round((summary.pnrReadiness ?? 0) * 100)}%` }}
+          />
+        </div>
+      </div>
+      <div className="mt-5 grid gap-2 text-sm">
+        <PlanningRow label="Selected records" value={`${summary.scans} bags`} />
+        <PlanningRow
+          label="Dimension coverage"
+          value={`${summary.dimensionReadyScans} scans with dimensions`}
+        />
+        <PlanningRow label="PNR coverage" value={`${summary.pnrLinkedScans} scans`} />
+        <PlanningRow label="Weight captured" value={formatKg(summary.totalWeightKg)} />
+        <PlanningRow
+          label="Exception pressure"
+          value={`${summary.oversizeCandidates} oversize · ${summary.highVolumeCandidates} high-volume`}
+        />
       </div>
     </div>
   );
@@ -1171,6 +1322,226 @@ function EmptyState() {
   );
 }
 
+function filterTravelRecords(records: TravelRecord[], filters: AirlineFilters) {
+  return records.filter((record) => {
+    const airlineMatch = filters.airline === "all" || record.airline === filters.airline;
+    const dateMatch = filters.date === "all" || record.flightDate === filters.date;
+    const flightMatch = filters.flight === "all" || record.flightNumber === filters.flight;
+    const categoryMatch = filters.category === "all" || record.baggageCategory === filters.category;
+    return airlineMatch && dateMatch && flightMatch && categoryMatch;
+  });
+}
+
+function summarizeTravelRecords(records: TravelRecord[]): TravelRecordSummary {
+  const weightedRows = records.filter((record) => record.weightKg != null);
+  const dimensionRows = records.filter((record) => record.linearCm != null);
+  return {
+    scans: records.length,
+    pnrLinkedScans: records.filter((record) => record.pnr).length,
+    uniquePnrs: uniqueCount(records.map((record) => record.pnr)),
+    uniqueFlights: uniqueCount(records.map(recordFlightIdentity)),
+    uniqueAirlines: uniqueCount(records.map((record) => record.airline)),
+    weightedScans: weightedRows.length,
+    totalWeightKg: sumNullableNumbers(weightedRows.map((record) => record.weightKg)),
+    avgWeightKg: averageNullableNumbers(weightedRows.map((record) => record.weightKg)),
+    dimensionReadyScans: dimensionRows.length,
+    oversizeCandidates: records.filter((record) => (record.linearCm ?? 0) > 158).length,
+    highVolumeCandidates: records.filter((record) => (record.volumeLiters ?? 0) >= 90).length,
+    avgLinearCm: averageNullableNumbers(dimensionRows.map((record) => record.linearCm)),
+    pnrReadiness: ratio(
+      records.filter((record) => record.pnr && record.flightNumber && record.weightKg != null)
+        .length,
+      records.length,
+    ),
+  };
+}
+
+function groupedRecordLoads(
+  records: TravelRecord[],
+  getLabel: (record: TravelRecord) => string | null,
+): TravelLoadItem[] {
+  const groups = new Map<
+    string,
+    {
+      label: string;
+      count: number;
+      totalWeightKg: number;
+      weightCount: number;
+      oversizeCount: number;
+      highVolumeCount: number;
+    }
+  >();
+
+  for (const record of records) {
+    const label = getLabel(record);
+    if (!label) continue;
+    const group = groups.get(label) ?? {
+      label,
+      count: 0,
+      totalWeightKg: 0,
+      weightCount: 0,
+      oversizeCount: 0,
+      highVolumeCount: 0,
+    };
+    group.count += 1;
+    if (record.weightKg != null) {
+      group.totalWeightKg += record.weightKg;
+      group.weightCount += 1;
+    }
+    if ((record.linearCm ?? 0) > 158) group.oversizeCount += 1;
+    if ((record.volumeLiters ?? 0) >= 90) group.highVolumeCount += 1;
+    groups.set(label, group);
+  }
+
+  return [...groups.values()]
+    .map((group) => ({
+      label: group.label,
+      count: group.count,
+      totalWeightKg: group.weightCount > 0 ? Math.round(group.totalWeightKg * 10) / 10 : null,
+      oversizeCount: group.oversizeCount,
+      highVolumeCount: group.highVolumeCount,
+    }))
+    .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label))
+    .slice(0, 12);
+}
+
+function distributionFromRecords(
+  records: TravelRecord[],
+  key: keyof Pick<TravelRecord, "baggageCategory" | "sizeClass" | "bagType" | "overallCondition">,
+): DistributionItem[] {
+  const counts = new Map<string, number>();
+  for (const record of records) {
+    const label = record[key] ?? "unknown";
+    counts.set(label, (counts.get(label) ?? 0) + 1);
+  }
+  return [...counts.entries()]
+    .map(([label, count]) => ({ label, count }))
+    .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label))
+    .slice(0, 12);
+}
+
+function flightRecordLabel(record: TravelRecord) {
+  if (!record.flightNumber && !record.airline) return null;
+  const flight = [record.airline, record.flightNumber].filter(Boolean).join(" ");
+  const route = [record.departureAirport, record.arrivalAirport].filter(Boolean).join("-");
+  return [flight || "Unknown flight", record.flightDate, route].filter(Boolean).join(" · ");
+}
+
+function pnrRecordLabel(record: TravelRecord) {
+  if (!record.pnr) return null;
+  const flight = [record.airline, record.flightNumber].filter(Boolean).join(" ");
+  return [record.pnr, flight].filter(Boolean).join(" · ");
+}
+
+function recordFlightIdentity(record: TravelRecord) {
+  if (!record.flightNumber && !record.airline) return null;
+  return [
+    record.airline,
+    record.flightNumber,
+    record.flightDate,
+    record.departureAirport,
+    record.arrivalAirport,
+  ]
+    .filter(Boolean)
+    .join("|");
+}
+
+function airlineScopeLabel(filters: AirlineFilters) {
+  const parts = [
+    filters.airline !== "all" ? filters.airline : "All airlines",
+    filters.date !== "all" ? filters.date : null,
+    filters.flight !== "all" ? filters.flight : null,
+    filters.category !== "all" ? formatLabel(filters.category) : null,
+  ].filter(Boolean);
+  return parts.join(" · ");
+}
+
+function downloadAirlineReport(records: TravelRecord[], filters: AirlineFilters) {
+  const headers = [
+    "scan_id",
+    "created_at",
+    "airline",
+    "flight_number",
+    "flight_date",
+    "route",
+    "terminal",
+    "pnr",
+    "bag_tag",
+    "baggage_category",
+    "weight_kg",
+    "linear_cm",
+    "volume_liters",
+    "bag_type",
+    "size_class",
+    "condition",
+    "status",
+  ];
+  const rows = records.map((record) => [
+    record.id,
+    record.createdAt,
+    record.airline,
+    record.flightNumber,
+    record.flightDate,
+    [record.departureAirport, record.arrivalAirport].filter(Boolean).join("-"),
+    record.terminal,
+    record.pnr,
+    record.bagTag,
+    record.baggageCategory,
+    record.weightKg,
+    record.linearCm,
+    record.volumeLiters,
+    record.bagType,
+    record.sizeClass,
+    record.overallCondition,
+    record.status,
+  ]);
+  const csv = [headers, ...rows].map(csvRow).join("\n");
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `bagscan-airline-${slugify(airlineScopeLabel(filters))}.csv`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
+function csvRow(values: Array<string | number | null>) {
+  return values
+    .map((value) => {
+      const text = value == null ? "" : String(value);
+      return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+    })
+    .join(",");
+}
+
+function sortedUniqueStrings(values: Array<string | null>) {
+  return [...new Set(values.filter((value): value is string => Boolean(value)))]
+    .sort((a, b) => a.localeCompare(b))
+    .slice(0, 250);
+}
+
+function sumNullableNumbers(values: Array<number | null>) {
+  const numbers = values.filter((value): value is number => value != null);
+  if (numbers.length === 0) return null;
+  return Math.round(numbers.reduce((sum, value) => sum + value, 0) * 10) / 10;
+}
+
+function averageNullableNumbers(values: Array<number | null>) {
+  const numbers = values.filter((value): value is number => value != null);
+  if (numbers.length === 0) return null;
+  return numbers.reduce((sum, value) => sum + value, 0) / numbers.length;
+}
+
+function ratio(value: number, total: number) {
+  return total > 0 ? value / total : null;
+}
+
+function uniqueCount(values: Array<string | null>) {
+  return new Set(values.filter((value): value is string => Boolean(value))).size;
+}
+
 function topLabel(items: DistributionItem[]) {
   const item = topItem(items);
   return item ? formatLabel(item.label) : "n/a";
@@ -1195,6 +1566,16 @@ function formatKg(value: number | null) {
 function formatLabel(value: string) {
   if (!value || value === "unknown") return "Unknown";
   return value.replace(/_/g, " ");
+}
+
+function slugify(value: string) {
+  return (
+    value
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "") || "report"
+  );
 }
 
 function formatDate(value: string) {

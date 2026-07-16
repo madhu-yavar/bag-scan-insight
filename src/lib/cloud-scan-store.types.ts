@@ -130,6 +130,26 @@ export type CloudAnalytics = {
     flightDates: string[];
     baggageCategories: string[];
   };
+  travelRecords: Array<{
+    id: string;
+    status: string;
+    createdAt: string;
+    pnr: string | null;
+    airline: string | null;
+    flightNumber: string | null;
+    flightDate: string | null;
+    departureAirport: string | null;
+    arrivalAirport: string | null;
+    terminal: string | null;
+    bagTag: string | null;
+    baggageCategory: string | null;
+    weightKg: number | null;
+    linearCm: number | null;
+    volumeLiters: number | null;
+    bagType: string | null;
+    sizeClass: string | null;
+    overallCondition: string | null;
+  }>;
   airlineLoads: Array<{
     label: string;
     count: number;
